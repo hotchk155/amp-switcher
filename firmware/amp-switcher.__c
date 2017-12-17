@@ -4,6 +4,8 @@ Target=PIC16LF1829
 Active Compiler=BoostC
 Active Config=Debug
 Config=1
+Last Ext=h
 [Files]
-Count=1
+Count=2
 File0=amp-switcher.c
+File1=chars.h
