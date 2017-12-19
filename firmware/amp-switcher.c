@@ -2,6 +2,7 @@
 // HEADER FILES
 //
 #include <system.h>
+#include <memory.h>
 #include "chars.h"
 
 // PIC CONFIG BITS
@@ -203,6 +204,9 @@ void interrupt( void )
 				P_SRO_RCK2 = 1;
 				P_SRO_RCK3 = 1;
 				P_DIGIT3 = 0;
+				
+				P_SRO_EN = 0; // enable shift registers
+				
 				ui_state = UI_DIGIT1;
 				break;			
 		}	
@@ -361,62 +365,6 @@ void midiThru()
 
 
 
-/*
-void refresh() 
-{
-	P_DIGIT1 = 1;
-	P_DIGIT2 = 1;
-	P_DIGIT3 = 1;
-			
-
-//	P_SR_SCK = 0;
-	P_SRI_LOAD = 0;
-	P_SRI_LOAD = 1;
-//	P_SR_SCK = 1;
-
-	P_SRO_RCK1 = 0;
-	cd_state = load_sr(~digit[0]);	
-	P_SRO_RCK1 = 1;
-	P_DIGIT1 = 0;
-	delay_ms(1);
-	P_DIGIT1 = 1;
-
-	P_SRO_RCK1 = 0;
-	key_state = load_sr(~digit[1]);	
-	P_SRO_RCK1 = 1;
-	P_DIGIT2 = 0;
-	delay_ms(1);
-	P_DIGIT2 = 1;
-
-	P_SRO_RCK1 = 0;
-	load_sr(~digit[2]);	
-	P_SRO_RCK1 = 1;
-	P_DIGIT3 = 0;
-	delay_ms(1);
-	P_DIGIT3 = 1;	
-	
-	P_SRO_RCK2 = 0;
-	P_SRO_RCK3 = 0;
-	load_sr(relays);
-	load_sr(chan_leds[0]);
-	load_sr(chan_leds[1]);
-	load_sr(0);
-	P_SRO_RCK2 = 1;
-	P_SRO_RCK3 = 1;
-	
-	//P_SRI_LOAD = 0;
-	
-	if(!P_BUTTON1) 
-		key_state |= (((unsigned long)1)<<K_BUTTON1);
-	if(!P_BUTTON2) 
-		key_state |= (((unsigned long)1)<<K_BUTTON2);
-	if(!P_BUTTON3) 
-		key_state |= (((unsigned long)1)<<K_BUTTON3);
-	
-}
-*/
-
-
 #define LED_OFF		0x00
 #define LED_GREEN	0x01
 #define LED_RED		0x02
@@ -550,6 +498,28 @@ void on_cable_disconnect(byte i) {
 	refresh_channels();
 }
 
+#define NUM_AMP_CHANNELS
+
+#define NOTE_AMP_MIN	1
+#define NOTE_AMP_MAX	(NOTE_AMP_MIN + NUM_AMP_CHANNELS)
+
+typedef struct {
+	byte note_chan;
+} DEVICE_CONFIG;
+DEVICE_CONFIG config;
+
+void handle_note(byte status, byte note, byte velocity) 
+{
+	byte chan;
+	if((status & 0x0F) == note_chan) {
+		if(note >= NOTE_AMP_MIN && note < NOTE_AMP_MAX) {
+			chan = note - NOTE_AMP_MIN;
+			if((status & 0xF0) == MIDI_NOTE_ON && velocity > 0) {
+			
+			}
+		}
+	}
+}
 
 
 ////////////////////////////////////////////////////////////
@@ -561,15 +531,16 @@ void main()
 	osccon = 0b01111010;
 	
 	// configure io
+	porta  = 0b00000000;
+	portb  = 0b00100000; // shift regs disabled
+	portc  = 0b00000000;
 	trisa = MASK_TRISA;              	
 	trisb = MASK_TRISB;              	
     trisc = MASK_TRISC;              
 	ansela = 0b00000000;
 	anselb = 0b00000000;
 	anselc = 0b00000000;
-	porta=0;
-	portb=0;
-	portc=0;
+
 
 	option_reg.7 = 0;
 	wpua.3=1;
@@ -581,6 +552,13 @@ void main()
 	P_DIGIT2 = 1;
 	P_DIGIT3 = 1;
 	ui_state = UI_DIGIT1;
+
+	memset(&output_state, 0, sizeof(output_state));
+	output_state.digit[0] = CHAR_C;
+	output_state.digit[1] = CHAR_H;
+	output_state.digit[2] = CHAR_1;
+	output_state.pending = 1;
+
 
 /*	// Configure timer 1 (controls tempo)
 	// Input 4MHz
@@ -612,12 +590,7 @@ void main()
 	intcon.6 = 1; //PEIE
 
 	// App loop
-	P_SRO_EN = 0; // enable shift registers
-	
-	output_state.digit[0] = CHAR_C;
-	output_state.digit[1] = CHAR_H;
-	output_state.digit[2] = CHAR_1;
-	output_state.pending = 1;
+
 	
 
 	unsigned long key_state = 0;
