@@ -3,7 +3,9 @@
 //
 #include <system.h>
 #include <memory.h>
+#include "amp-switcher.h"
 #include "chars.h"
+
 
 // PIC CONFIG BITS
 // - RESET INPUT DISABLED
@@ -13,15 +15,21 @@
 #pragma DATA _CONFIG2, _WRT_OFF & _PLLEN_OFF & _STVREN_ON & _BORV_19 & _LVP_OFF
 #pragma CLOCK_FREQ 16000000
 
-//
-// TYPE DEFS
-//
-typedef unsigned char byte;
 
 //
 // MACRO DEFS
 //
-
+// MIDI message bytes
+#define MIDI_SYNCH_TICK     	0xf8
+#define MIDI_SYNCH_START    	0xfa
+#define MIDI_SYNCH_CONTINUE 	0xfb
+#define MIDI_SYNCH_STOP     	0xfc
+#define MIDI_SYSEX_BEGIN     	0xf0
+#define MIDI_SYSEX_END     		0xf7
+#define MIDI_CC_NRPN_HI 		99
+#define MIDI_CC_NRPN_LO 		98
+#define MIDI_CC_DATA_HI 		6
+#define MIDI_CC_DATA_LO 		38
 
 #define P_BUTTON1	porta.3
 #define P_BUTTON2	porta.4
@@ -57,51 +65,56 @@ typedef unsigned char byte;
 #define KEY_DEBOUNCE_MS				50
 #define CABLE_DETECT_DEBOUNCE_MS	200
 
+
+
+
+#define K_CHAN1 0
+#define K_CHAN2 7
+#define K_CHAN3 1
+#define K_CHAN4 6
+#define K_CHAN5 5
+#define K_CHAN6 3
+#define K_CHAN7 4
+#define K_CHAN8 2
+
 #define K_BUTTON1	16
 #define K_BUTTON2	17
 #define K_BUTTON3	18
 
+#define K_MAX_BITS	19 // the key status registers are 32-bit but how many in use?
 
+
+
+//
+// TYPE DEFS
+//
 //
 // GLOBAL DATA
 //
+
 
 // timer stuff
 volatile byte ms_tick = 0;
 volatile unsigned int timer_init_scalar = 0;
 
 // define the buffer used to receive MIDI input
-#define SZ_RXBUFFER 20
-volatile byte rxBuffer[SZ_RXBUFFER];
-volatile byte rxHead = 0;
-volatile byte rxTail = 0;
+#define SZ_RXBUFFER 			64		// size of MIDI receive buffer (power of 2)
+#define SZ_RXBUFFER_MASK 		0x3F	// mask to keep an index within range of buffer
+volatile byte rx_buffer[SZ_RXBUFFER];	// the MIDI receive buffer
+volatile byte rx_head = 0;				// buffer data insertion index
+volatile byte rx_tail = 0;				// buffer data retrieval index
+
+// State flags used while receiving MIDI data
+byte midi_status = 0;					// current MIDI message status (running status)
+byte midi_num_params = 0;				// number of parameters needed by current MIDI message
+byte midi_params[2];					// parameter values of current MIDI message
+char midi_param = 0;					// number of params currently received
+byte midi_ticks = 0;					// number of MIDI clock ticks received
+byte sysex_state = SYSEX_NONE;			// whether we are currently inside a sysex block
 
 
-#define NUM_CHANNELS 8
 
-//volatile byte chan_switches = 0;
-//volatile byte cable_detect = 0;
-
-enum {
-	UI_DIGIT1,
-	UI_DIGIT2,
-	UI_DIGIT3
-};
 volatile byte ui_state;
-
-
-typedef struct {
-	byte pending;
-	unsigned long key_state;
-	unsigned long cd_state;
-} INPUT_STATE;
-
-typedef struct {
-	byte pending;
-	byte digit[3];
-	byte chan_leds[2];
-	byte relays;
-} OUTPUT_STATE;
 
 volatile INPUT_STATE panel_input = {0};
 volatile INPUT_STATE ui_panel_input = {0};
@@ -128,10 +141,13 @@ byte load_sr(byte dat) {
 
 
 ////////////////////////////////////////////////////////////
-// INTERRUPT HANDLER CALLED WHEN CHARACTER RECEIVED AT 
-// SERIAL PORT OR WHEN TIMER 1 OVERLOWS
+// INTERRUPT HANDLER 
 void interrupt( void )
 {
+	
+	/////////////////////////////////////////////////////////////
+	// TIMER 0 INTERRUPT
+	
 	// timer 0 rollover ISR. Maintains the count of 
 	// "system ticks" that we use for key debounce etc
 	if(intcon.2)
@@ -212,33 +228,24 @@ void interrupt( void )
 		}	
 	}
 		
-	// serial rx ISR
+	/////////////////////////////////////////////////////
+	// UART RECEIVE
 	if(pir1.5)
 	{	
-		// get the byte
 		byte b = rcreg;
-		
-		// calculate next buffer head
-		byte nextHead = (rxHead + 1);
-		if(nextHead >= SZ_RXBUFFER) 
-		{
-			nextHead -= SZ_RXBUFFER;
+		byte next_head = (rx_head + 1)&SZ_RXBUFFER_MASK;
+		if(next_head != rx_tail) {
+			rx_buffer[rx_head] = b;
+			rx_head = next_head;
 		}
-		
-		// if buffer is not full
-		if(nextHead != rxTail)
-		{
-			// store the byte
-			rxBuffer[rxHead] = b;
-			rxHead = nextHead;
-		}		
-	}
+		pir1.5 = 0;
+	}		
 }
 
 
 ////////////////////////////////////////////////////////////
 // INITIALISE SERIAL PORT FOR MIDI
-void initUSART()
+void init_usart()
 {
 	pir1.1 = 1;		//TXIF 		
 	pir1.5 = 0;		//RCIF
@@ -268,109 +275,153 @@ void initUSART()
 	
 }
 
-/*
 ////////////////////////////////////////////////////////////
-// RUN MIDI THRU
-void midiThru()
+// GET MESSAGES FROM MIDI INPUT
+byte midi_in()
 {
 	// loop until there is no more data or
 	// we receive a full message
 	for(;;)
 	{
-		// buffer overrun error?
+		// usart buffer overrun error?
 		if(rcsta.1)
 		{
 			rcsta.4 = 0;
 			rcsta.4 = 1;
 		}
-		// any data in the buffer?
-		if(rxHead == rxTail)
-		{
-			// no data ready
-			return;
-		}
+		
+		// check for empty receive buffer
+		if(rx_head == rx_tail)
+			return 0;
 		
 		// read the character out of buffer
-		byte q = rxBuffer[rxTail];
-		if(++rxTail >= SZ_RXBUFFER) 
-			rxTail -= SZ_RXBUFFER;
-		
-		// external clock mode
-		if(MODE_EXTCLOCK == _mode) 
-		{		
-			if(_options & OPTION_THRUANIMATE) {
-				// animate and send
-				duty[q%6] = q%INITIAL_DUTY;
-				send(q);
-			}
-			else {
-				// blink the four edge LEDs in time 
-				// with the external MIDI beat clock
-				byte d = 0;
-				switch(q) {
-					case 0xF8:
-						if(!tickCount) {
-							d = maxDuty;
-						}
-						if(++tickCount>=24) {
-							tickCount = 0;
-						}
-						break;
-					case 0xFA:
-						tickCount = 0;
-						break;									
+		byte ch = rx_buffer[rx_tail];
+		++rx_tail;
+		rx_tail&=SZ_RXBUFFER_MASK;
+
+		// REALTIME MESSAGE
+		if((ch & 0xf0) == 0xf0)
+		{
+			switch(ch)
+			{
+			// REALTIME MESSAGES
+			case MIDI_SYNCH_TICK:
+			case MIDI_SYNCH_START:
+			case MIDI_SYNCH_CONTINUE:
+			case MIDI_SYNCH_STOP:
+				return ch;		
+/*				
+			// START OF SYSEX	
+			case MIDI_SYSEX_BEGIN:
+				sysex_state = SYSEX_ID0; 
+				break;
+			// END OF SYSEX	
+			case MIDI_SYSEX_END:
+				switch(sysex_state) {
+				case SYSEX_IGNORE: // we're ignoring a syex block
+				case SYSEX_NONE: // we weren't even in sysex mode!					
+					break;			
+				case SYSEX_PARAMH:	// the state we'd expect to end in
+					P_LED1 = 1; 
+					P_LED2 = 1; 
+					delay_ms(250); 
+					delay_ms(250); 
+					delay_ms(250); 
+					delay_ms(250); 
+					P_LED1 = 0; 
+					P_LED2 = 0; 
+					storage_write_patch();	// store to EEPROM 
+					all_reset();
+					break;
+				default:	// any other state would imply bad sysex data
+					P_LED1 = 0; 
+					for(char i=0; i<10; ++i) {
+						P_LED2 = 1; 
+						delay_ms(100);
+						P_LED2 = 0; 
+						delay_ms(100);
+					}
+					all_reset();
+					break;
 				}
-				duty[0] = d;
-				duty[1] = d;
-				duty[4] = d;
-				duty[5] = d;				
-				
-				P_LED2 = 1;
-				P_LED3 = 1;
-				send(q);
-				P_LED2 = 0;
-				P_LED3 = 0;				
+				sysex_state = SYSEX_NONE; 
+				break;
+*/				
 			}
-		}
-		// should we indicate thru traffic with flickering LEDs?
-		else 
-		{					
+		}    
+		// STATUS BYTE
+		else if(!!(ch & 0x80))
+		{
+			// a status byte cancels sysex state
+			sysex_state = SYSEX_NONE;
 		
-			// Check for MIDI realtime message (e.g. clock)
-			if((q & 0xF8) == 0xF8)
+			midi_param = 0;
+			midi_status = ch; 
+			switch(ch & 0xF0)
 			{
-				// if we are not passing realtime messages then skip it
-				if(!(_options & OPTION_PASSREALTIMEMSG))
-					continue;
+			case 0xA0: //  Aftertouch  1  key  touch  
+			case 0xC0: //  Patch change  1  instrument #   
+			case 0xD0: //  Channel Pressure  1  pressure  
+				midi_num_params = 1;
+				break;    
+			case 0x80: //  Note-off  2  key  velocity  
+			case 0x90: //  Note-on  2  key  veolcity  
+			case 0xB0: //  Continuous controller  2  controller #  controller value  
+			case 0xE0: //  Pitch bend  2  lsb (7 bits)  msb (7 bits)  
+			default:
+				midi_num_params = 2;
+				break;        
 			}
-			else
+		}    
+		else 
+		{
+/*		
+			switch(sysex_state) // are we inside a sysex block?
 			{
-				// if we are not passing non-realtime messages then skip it
-				if(!(_options & OPTION_PASSOTHERMSG))
-					continue;
-			}
-				
-			// flicker and send
-			P_LED2 = 1;
-			P_LED3 = 1;
-			send(q);
-			P_LED2 = 0;
-			P_LED3 = 0;
+			// SYSEX MANUFACTURER ID
+			case SYSEX_ID0: sysex_state = (ch == MY_SYSEX_ID0)? SYSEX_ID1 : SYSEX_IGNORE; break;
+			case SYSEX_ID1: sysex_state = (ch == MY_SYSEX_ID1)? SYSEX_ID2 : SYSEX_IGNORE; break;
+			case SYSEX_ID2: sysex_state = (ch == MY_SYSEX_ID2)? SYSEX_PARAMH : SYSEX_IGNORE; break;
+			// CONFIG PARAM DELIVERED BY SYSEX
+			case SYSEX_PARAMH: nrpn_hi = ch; ++sysex_state; break;
+			case SYSEX_PARAML: nrpn_lo = ch; ++sysex_state;break;
+			case SYSEX_VALUEH: nrpn_value_hi = ch; ++sysex_state;break;
+			case SYSEX_VALUEL: nrpn(nrpn_hi, nrpn_lo, nrpn_value_hi, ch); sysex_state = SYSEX_PARAMH; break;
+			case SYSEX_IGNORE: break;			
+			// MIDI DATA
+			case SYSEX_NONE: */
+				if(midi_status)
+				{
+					// gathering parameters
+					midi_params[midi_param++] = ch;
+					if(midi_param >= midi_num_params)
+					{
+						// we have a complete message.. is it one we care about?
+						midi_param = 0;
+						switch(midi_status&0xF0)
+						{
+						case 0x80: // note off
+						case 0x90: // note on
+						case 0xE0: // pitch bend
+						case 0xB0: // cc
+						case 0xD0: // aftertouch
+							return midi_status; 
+						}
+					}
+				}
+			//}
 		}
-	}		
+	}
+	// no message ready yet
+	return 0;
 }
-*/
 
 
 
 
 
-#define LED_OFF		0x00
-#define LED_GREEN	0x01
-#define LED_RED		0x02
-#define LED_MASK	0x03
 
-void set_chan_led(byte which, byte state) 
+void ui_chan_led(byte which, byte state) 
 {
 	which = 7-which;
 	byte shift = (which%4)*2;
@@ -385,140 +436,99 @@ void set_chan_led(byte which, byte state)
 	}
 }
 
-#define K_CHAN1 0
-#define K_CHAN2 7
-#define K_CHAN3 1
-#define K_CHAN4 6
-#define K_CHAN5 5
-#define K_CHAN6 3
-#define K_CHAN7 4
-#define K_CHAN8 2
 
-
-enum {
-	CH_AMP, 
-	CH_CAB, 
-	CH_FX
-};
-
-enum {
-	IS_DISCONNECTED,
-	IS_CONNECTED,
-	IS_SELECTED
-};
-
-typedef struct {
-	byte type;
-	byte status;
-} CHANNEL_INFO;
-
-CHANNEL_INFO chan[NUM_CHANNELS];
-
-void init_channels() {	
-	int i;
-	for(i=0; i<=3; ++i) {
-		chan[i].type = CH_AMP;
-		//chan[i].status = IS_DISCONNECTED;
-		chan[i].status = IS_CONNECTED;
-	}
-	for(i=4; i<=6; ++i) {
-		chan[i].type = CH_CAB;
-		chan[i].status = IS_DISCONNECTED;
-		chan[i].status = IS_CONNECTED;
-	}
-	for(i=7; i<=7; ++i) {
-		chan[i].type = CH_FX;
-		chan[i].status = IS_DISCONNECTED;
-		chan[i].status = IS_CONNECTED;
-	}
-}
-
-void refresh_channels() {
-	output_state.relays = 0;
-	for(int i=0; i<NUM_CHANNELS; ++i) {
-		switch(chan[i].status) {
-			case IS_SELECTED:
-				set_chan_led(i, LED_RED);
-				output_state.relays |= ((unsigned long)1)<<i;
-				break;
-			case IS_CONNECTED:
-				set_chan_led(i, LED_GREEN);
-				break;
-			default:
-	 			set_chan_led(i, LED_OFF);
-				break;
-		}
-	}
-	output_state.pending = 1;
-}
-
-void select_channel(byte which) {
-	switch(chan[which].status)
-	{ 
-		case IS_DISCONNECTED:
-			return;
-		case IS_SELECTED:
-			chan[which].status = IS_CONNECTED;
-			break;
-		case IS_CONNECTED:
-			for(int i=0; i<NUM_CHANNELS; ++i) {
-				if(chan[i].status == IS_SELECTED && chan[i].type == chan[which].type) {
-					chan[i].status = IS_CONNECTED;
-				}	
-			}
-			chan[which].status = IS_SELECTED;					
-			break;
-	}
-	refresh_channels();
-}
 
 void on_key_press(byte i) {
 	switch(i) {
-		case K_CHAN1: select_channel(0); break;
-		case K_CHAN2: select_channel(1); break;
-		case K_CHAN3: select_channel(2); break;
-		case K_CHAN4: select_channel(3); break;
-		case K_CHAN5: select_channel(4); break;
-		case K_CHAN6: select_channel(5); break;
-		case K_CHAN7: select_channel(6); break;
-		case K_CHAN8: select_channel(7); break;
+		case K_CHAN1: chan_click(0); break;
+		case K_CHAN2: chan_click(1); break;
+		case K_CHAN3: chan_click(2); break;
+		case K_CHAN4: chan_click(3); break;
+		case K_CHAN5: chan_click(4); break;
+		case K_CHAN6: chan_click(5); break;
+		case K_CHAN7: chan_click(6); break;
+		case K_CHAN8: chan_click(7); break;
 //		case K_BUTTON1: digit[0] = CHAR_A; break;
 //		case K_BUTTON2: digit[0] = CHAR_B; break;
 //		case K_BUTTON3: digit[0] = CHAR_C; break;
 	}
 }
-byte cable_map[NUM_CHANNELS] = {7,6,5,4,3,2,1,0};
 
-void on_cable_connect(byte i) {
-	chan[cable_map[i]].status = IS_CONNECTED;
-	refresh_channels();
-}
-void on_cable_disconnect(byte i) {
-	chan[cable_map[i]].status = IS_DISCONNECTED;
-	refresh_channels();
-}
-
-#define NUM_AMP_CHANNELS
-
-#define NOTE_AMP_MIN	1
-#define NOTE_AMP_MAX	(NOTE_AMP_MIN + NUM_AMP_CHANNELS)
 
 typedef struct {
-	byte note_chan;
+	byte midi_chan;
+	byte amp_cc;
+	byte cab_cc;
+	byte fx_cc[NUM_FX_CHANNELS];
 } DEVICE_CONFIG;
 DEVICE_CONFIG config;
 
-void handle_note(byte status, byte note, byte velocity) 
+void init_config() {
+	config.midi_chan = DEFAULT_MIDI_CHAN;
+	config.amp_cc = DEFAULT_AMP_CC;
+	config.cab_cc = DEFAULT_CAB_CC;
+	config.fx_cc[0] = DEFAULT_FX0_CC;
+	config.fx_cc[1] = DEFAULT_FX1_CC;
+}
+
+
+
+
+
+////////////////////////////////////////////////////////////
+// HANDLE MIDI NOTE
+void on_midi_note(byte chan, byte note, byte vel) 
 {
-	byte chan;
-	if((status & 0x0F) == note_chan) {
-		if(note >= NOTE_AMP_MIN && note < NOTE_AMP_MAX) {
-			chan = note - NOTE_AMP_MIN;
-			if((status & 0xF0) == MIDI_NOTE_ON && velocity > 0) {
-			
+	if(chan == config.midi_chan) {
+		if(note >= NOTE_AMP_BASE && note < NOTE_AMP_MAX) {
+			if(vel) {
+				chan_select(AMP_BASE + note - NOTE_AMP_BASE);
+			}
+		}
+		else if(note >= NOTE_CAB_BASE && note < NOTE_CAB_MAX) {
+			if(vel) {
+				chan_select(CAB_BASE + note - NOTE_CAB_BASE);
+			}
+		}
+		else if(note >= NOTE_FX_BASE && note < NOTE_FX_MAX) {
+			if(vel) {
+				chan_select(FX_BASE + note - NOTE_FX_BASE);
+			}
+			else {
+				chan_deselect(FX_BASE + note - NOTE_FX_BASE);
+			}
+		}
+	}	
+}
+
+////////////////////////////////////////////////////////////
+// HANDLE MIDI CC MESSAGE
+void on_midi_cc(byte chan, byte cc, byte value) 
+{
+	if(chan == config.midi_chan) {
+		if(cc == config.amp_cc && value < NUM_AMP_CHANNELS) {
+			chan_select(value + AMP_BASE);
+		}
+		if(cc == config.cab_cc && value < NUM_CAB_CHANNELS) {
+			chan_select(value + CAB_BASE);
+		}
+		for(int i=0; i < NUM_FX_CHANNELS; ++i) {
+			if(cc == config.fx_cc[i]) {
+				if(value) {
+					chan_select(i + FX_BASE);
+				}
+				else {
+					chan_deselect(i + FX_BASE);
+				}
 			}
 		}
 	}
+}
+
+////////////////////////////////////////////////////////////
+// HANDLE MIDI PROGRAM CHANGE
+void on_midi_pgm_change(byte chan, byte pgm) 
+{
 }
 
 
@@ -529,6 +539,9 @@ void main()
 	
 	// osc control / 16MHz / internal
 	osccon = 0b01111010;
+	
+	apfcon0.7 = 1; // RX pin is RC5
+	apfcon0.2 = 1; // TX pin is RC4
 	
 	// configure io
 	porta  = 0b00000000;
@@ -558,6 +571,8 @@ void main()
 	output_state.digit[1] = CHAR_H;
 	output_state.digit[2] = CHAR_1;
 	output_state.pending = 1;
+
+	panel_input.pending = 0;	
 
 
 /*	// Configure timer 1 (controls tempo)
@@ -600,64 +615,104 @@ void main()
 	byte key_debounce = 0;
 	byte cd_debounce = 0;
 
-	init_channels();
-	refresh_channels();
 
-	panel_input.pending = 0;	
+	init_usart();
+	init_config();
+	chan_init();
+	chan_update();
+
 	for(;;)
 	{	
-		// grab input status from the 
+	
+		//////////////////////////////////////////////////////////////////////
+		// PROCESS PANEL INPUT
+		//////////////////////////////////////////////////////////////////////
+	
+		// If there are panel inputs waiting for us then grab them...
 		if(panel_input.pending) {
 			key_state = panel_input.key_state;
 			cd_state = panel_input.cd_state;
 			panel_input.pending = 0;
 		}
 
+		// once a millisecond we process panel input
 		if(ms_tick)
 		{
 			ms_tick = 0;
 			
+			// First deal with input from buttons
 			if(key_debounce) {
+				// debouncing keys
 				--key_debounce;
 			}
-			else {
- 
+			else {				
+				// which keys have been pressed?
 				unsigned long key_press = key_state & ~last_key_state;
 				if(key_press) {
 					unsigned long mask = 0x01;
-					for(int i=0; i<20; ++i) {					
+					for(int i=0; i<K_MAX_BITS; ++i) {					
 						if(mask & key_press) {
+							// call keypress handler for each pressed key
 							on_key_press(i);
 						}
 						mask<<=1;
 					}
+					// ignore key events for debounce period
 					key_debounce = KEY_DEBOUNCE_MS;
 				}
 				last_key_state = key_state;
 			}
 
+			// Next deal with cable detect events
 			if(cd_debounce) {
+				// apply a debounce time
 				--cd_debounce;
 			}
 			else {
+				// which inputs have been connected or disconnected?
 				unsigned int cd_change = cd_state ^ last_cd_state;
 				if(cd_change) {
-					unsigned int mask = 0x01;
+					unsigned int mask = 0x80;
 					for(int i=0; i<NUM_CHANNELS; ++i) {					
 						if(mask & cd_change) {
 							if(mask & cd_state) {
-								on_cable_connect(i);
+								// cable connected 
+								chan_connect(i);
 							}
 							else {
-								on_cable_disconnect(i);
+								// cable disconnected
+								chan_disconnect(i);
 							}
 						}
-						mask<<=1;
+						mask>>=1;
 					}
+					// ignore changes for debounce period
 					cd_debounce = CABLE_DETECT_DEBOUNCE_MS;
 				}
 				last_cd_state = cd_state;
 			}
 		}			
+
+		//////////////////////////////////////////////////////////////////////		
+		// PROCESS MIDI INPUT
+		//////////////////////////////////////////////////////////////////////
+		// poll for incoming MIDI data
+		byte msg = midi_in();		
+		switch(msg & 0xF0) {
+		
+		case 0x80: // MIDI NOTE OFF
+			on_midi_note(msg&0x0F, midi_params[0], 0);
+			break;
+		case 0x90: // MIDI NOTE ON
+			on_midi_note(msg&0x0F, midi_params[0], midi_params[1]);
+			break;		
+		case 0xB0: // CONTINUOUS CONTROLLER
+			on_midi_cc(msg&0x0F, midi_params[0], midi_params[1]);
+			break;
+		case 0xC0: // PROGRAM CHANGE
+			on_midi_pgm_change(msg&0x0F, midi_params[0]);
+			break;
+		}
+		
 	}
 }
