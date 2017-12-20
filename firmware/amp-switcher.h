@@ -20,8 +20,8 @@
 #define NOTE_FX_BASE	60
 #define NOTE_FX_MAX		(NOTE_FX_BASE + NUM_FX_CHANNELS)
 
+#define NUM_PATCH_BANKS	4
 
-#define ALL_CHANNELS 0xFF
 
 typedef unsigned char byte;
 
@@ -89,6 +89,20 @@ typedef struct {
 
 
 
+#define K_CHAN1 0
+#define K_CHAN2 7
+#define K_CHAN3 1
+#define K_CHAN4 6
+#define K_CHAN5 5
+#define K_CHAN6 3
+#define K_CHAN7 4
+#define K_CHAN8 2
+
+#define K_BUTTON1	16
+#define K_BUTTON2	17
+#define K_BUTTON3	18
+
+#define K_MAX_BITS	19 // the key status registers are 32-bit but how many in use?
 
 
 #define LED_OFF		0x00
@@ -103,6 +117,8 @@ extern volatile OUTPUT_STATE output_state = {0};
 
 
 void ui_chan_led(byte which, byte state);
+void ui_key_press(byte i, byte press);
+void ui_run();
 
 /////////////////////////////////////////////////////////////////////
 // Make a channel selected (if possible)
@@ -113,3 +129,5 @@ void chan_deselect(byte which);
 void chan_click(byte which);
 void chan_connect(byte which);
 void chan_disconnect(byte which);
+void chan_deselect_range(byte min, byte max);
+

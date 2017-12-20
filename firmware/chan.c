@@ -1,5 +1,6 @@
 /////////////////////////////////////////////////////////////////////
 // CHANNEL STATE HANDLING
+#include <system.h>
 #include "amp-switcher.h"
 
 typedef struct {
@@ -78,10 +79,23 @@ void chan_select(byte which) {
 }
 
 /////////////////////////////////////////////////////////////////////
-// Make a channel deselected 
+// Make channel(s) deselected 
 void chan_deselect(byte which) {
 	if(which < NUM_CHANNELS && chan[which].status == IS_SELECTED) {
 		chan[which].status = IS_CONNECTED;
+		chan_update();
+	}
+}
+
+void chan_deselect_range(byte min, byte max) {
+	byte change = 0;
+	for(byte i=min; i<=max; ++i) {
+		if(i < NUM_CHANNELS && chan[i].status == IS_SELECTED) {
+			chan[i].status = IS_CONNECTED;
+			change = 1;
+		}
+	}	
+	if(change) {
 		chan_update();
 	}
 }
@@ -97,6 +111,7 @@ void chan_click(byte which) {
 			case IS_CONNECTED:
 				chan_select(which);
 				break;
+				
 		}
 	}	
 }

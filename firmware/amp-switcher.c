@@ -67,21 +67,7 @@
 
 
 
-
-#define K_CHAN1 0
-#define K_CHAN2 7
-#define K_CHAN3 1
-#define K_CHAN4 6
-#define K_CHAN5 5
-#define K_CHAN6 3
-#define K_CHAN7 4
-#define K_CHAN8 2
-
-#define K_BUTTON1	16
-#define K_BUTTON2	17
-#define K_BUTTON3	18
-
-#define K_MAX_BITS	19 // the key status registers are 32-bit but how many in use?
+#define BLINK_MS_MIDI 2
 
 
 
@@ -113,6 +99,9 @@ byte midi_ticks = 0;					// number of MIDI clock ticks received
 byte sysex_state = SYSEX_NONE;			// whether we are currently inside a sysex block
 
 
+byte led1_timeout = 0;
+byte led2_timeout = 0;
+
 
 volatile byte ui_state;
 
@@ -122,6 +111,14 @@ volatile INPUT_STATE ui_panel_input = {0};
 volatile OUTPUT_STATE output_state = {0};
 volatile OUTPUT_STATE ui_output_state = {0};
 
+void blink_blue(byte ms) {
+	P_LED2 = 1;
+	led2_timeout = ms;
+}
+void blink_yellow(byte ms) {
+	P_LED1 = 1;
+	led1_timeout = ms;
+}
 
 byte load_sr(byte dat) {
 	byte result = 0;
@@ -231,7 +228,7 @@ void interrupt( void )
 	/////////////////////////////////////////////////////
 	// UART RECEIVE
 	if(pir1.5)
-	{	
+	{		
 		byte b = rcreg;
 		byte next_head = (rx_head + 1)&SZ_RXBUFFER_MASK;
 		if(next_head != rx_tail) {
@@ -405,6 +402,7 @@ byte midi_in()
 						case 0xE0: // pitch bend
 						case 0xB0: // cc
 						case 0xD0: // aftertouch
+							blink_blue(BLINK_MS_MIDI);
 							return midi_status; 
 						}
 					}
@@ -421,38 +419,9 @@ byte midi_in()
 
 
 
-void ui_chan_led(byte which, byte state) 
-{
-	which = 7-which;
-	byte shift = (which%4)*2;
-	if(which < 4) {
-		output_state.chan_leds[0] &= ~(LED_MASK<<shift);
-		output_state.chan_leds[0]  |= (state<<shift);		
-	}
-	else {
-		which %= 4;
-		output_state.chan_leds[1] &= ~(LED_MASK<<shift);
-		output_state.chan_leds[1]  |= (state<<shift);		
-	}
-}
 
 
 
-void on_key_press(byte i) {
-	switch(i) {
-		case K_CHAN1: chan_click(0); break;
-		case K_CHAN2: chan_click(1); break;
-		case K_CHAN3: chan_click(2); break;
-		case K_CHAN4: chan_click(3); break;
-		case K_CHAN5: chan_click(4); break;
-		case K_CHAN6: chan_click(5); break;
-		case K_CHAN7: chan_click(6); break;
-		case K_CHAN8: chan_click(7); break;
-//		case K_BUTTON1: digit[0] = CHAR_A; break;
-//		case K_BUTTON2: digit[0] = CHAR_B; break;
-//		case K_BUTTON3: digit[0] = CHAR_C; break;
-	}
-}
 
 
 typedef struct {
@@ -497,6 +466,9 @@ void on_midi_note(byte chan, byte note, byte vel)
 			else {
 				chan_deselect(FX_BASE + note - NOTE_FX_BASE);
 			}
+		}
+		else if(note == NOTE_AMP_MUTE) {
+			chan_deselect_range(AMP_BASE, AMP_MAX);
 		}
 	}	
 }
@@ -567,11 +539,7 @@ void main()
 	ui_state = UI_DIGIT1;
 
 	memset(&output_state, 0, sizeof(output_state));
-	output_state.digit[0] = CHAR_C;
-	output_state.digit[1] = CHAR_H;
-	output_state.digit[2] = CHAR_1;
 	output_state.pending = 1;
-
 	panel_input.pending = 0;	
 
 
@@ -639,6 +607,19 @@ void main()
 		if(ms_tick)
 		{
 			ms_tick = 0;
+
+			ui_run();
+	
+			if(led1_timeout) {
+				if(!--led1_timeout) {
+					P_LED1 = 0;
+				}
+			}
+			if(led2_timeout) {
+				if(!--led2_timeout) {
+					P_LED2 = 0;
+				}
+			}
 			
 			// First deal with input from buttons
 			if(key_debounce) {
@@ -647,13 +628,17 @@ void main()
 			}
 			else {				
 				// which keys have been pressed?
-				unsigned long key_press = key_state & ~last_key_state;
-				if(key_press) {
+				unsigned long key_change = key_state ^ last_key_state;
+				if(key_change) {
 					unsigned long mask = 0x01;
 					for(int i=0; i<K_MAX_BITS; ++i) {					
-						if(mask & key_press) {
-							// call keypress handler for each pressed key
-							on_key_press(i);
+						if(mask & key_change) {
+							if(mask & key_state) {
+								ui_key_press(i,1);
+							}
+							else {
+								ui_key_press(i,0);
+							}
 						}
 						mask<<=1;
 					}
