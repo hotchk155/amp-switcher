@@ -7,6 +7,7 @@
 #define SHOW_PATCH_MS 	3000
 #define KB_REPEAT_DELAY_MS 	1000
 #define KB_REPEAT_INTERVAL_MS 	30
+#define KB_CHAN_ERROR_MS 	1000
 
 enum {
 	UI_IDLE,
@@ -15,9 +16,11 @@ enum {
 	UI_SEL_PCNO
 };
 
-byte ui_pending = 0;
 byte ui_digit[3] = {0};
 byte ui_chan_leds[2] = {0};
+byte ui_chan_error_mask[2] = {0};
+byte ui_chan_error_leds[2] = {0};
+
 byte ui_blink = 0;
 byte ui_bank = 0;
 byte ui_patch = 0;
@@ -25,6 +28,7 @@ byte ui_patch_char = 0;
 byte ui_mode = UI_IDLE;
 byte ui_data_val = 0;
 
+int ui_chan_error_timeout = 0;
 
 int ui_show_patch = 0;
 int ui_kb_repeat = 0;
@@ -65,8 +69,25 @@ void ui_chan_led(byte which, byte state) {
 		ui_chan_leds[1] &= ~(LED_MASK<<shift);
 		ui_chan_leds[1]  |= (state<<shift);		
 	}
-	ui_pending = 1;
 }
+
+void ui_chan_error(byte which) {
+	which = 7-which;
+	byte shift = (which%4)*2;
+	if(which < 4) {
+		ui_chan_error_mask[0] |= (LED_MASK<<shift);
+		ui_chan_error_leds[0] &= ~(LED_MASK<<shift);
+		ui_chan_error_leds[0] |= (LED_RED<<shift);		
+	}
+	else {
+		which %= 4;
+		ui_chan_error_mask[1] |= (LED_MASK<<shift);
+		ui_chan_error_leds[1] &= ~(LED_MASK<<shift);
+		ui_chan_error_leds[1] |= (LED_RED<<shift);		
+	}
+	ui_chan_error_timeout = KB_CHAN_ERROR_MS;
+}
+
 
 /////////////////////////////////////////////////////
 // SAVE OR LOAD A PATCH 
@@ -89,14 +110,14 @@ void ui_patch_click(byte which) {
 void ui_key_press_IDLE(byte i, byte press) {
 	if(press) {
 		switch(i) {
-			case K_CHAN1: chan_click(0); break;
-			case K_CHAN2: chan_click(1); break;
-			case K_CHAN3: chan_click(2); break;
-			case K_CHAN4: chan_click(3); break;
-			case K_CHAN5: chan_click(4); break;
-			case K_CHAN6: chan_click(5); break;
-			case K_CHAN7: chan_click(6); break;
-			case K_CHAN8: chan_click(7); break;
+			case K_CHAN1: chan_event(0, CHAN_CLICK); break;
+			case K_CHAN2: chan_event(1, CHAN_CLICK); break;
+			case K_CHAN3: chan_event(2, CHAN_CLICK); break;
+			case K_CHAN4: chan_event(3, CHAN_CLICK); break;
+			case K_CHAN5: chan_event(4, CHAN_CLICK); break;
+			case K_CHAN6: chan_event(5, CHAN_CLICK); break;
+			case K_CHAN7: chan_event(6, CHAN_CLICK); break;
+			case K_CHAN8: chan_event(7, CHAN_CLICK); break;
 			case K_BUTTON1: ui_mode = UI_SEL_LOAD; break;
 		}
 	}
@@ -235,12 +256,26 @@ void ui_run() {
 			output_state.digit[2] = ui_digit(d);
 			break;
 	}
-		
+
 	// LEDS
 	switch(ui_mode) {
 		case UI_IDLE:
 			output_state.chan_leds[0] = ui_chan_leds[0];
 			output_state.chan_leds[1] = ui_chan_leds[1];
+			if(ui_chan_error_timeout) {
+				output_state.chan_leds[0] &= ~ui_chan_error_mask[0];
+				output_state.chan_leds[1] &= ~ui_chan_error_mask[1];
+				if(ui_blink&0x80) {
+					output_state.chan_leds[0] |= ui_chan_error_leds[0];
+					output_state.chan_leds[1] |= ui_chan_error_leds[1];
+				}
+				if(!--ui_chan_error_timeout) {
+					ui_chan_error_mask[0] = 0;
+					ui_chan_error_mask[1] = 0;
+					ui_chan_error_leds[0] = 0;
+					ui_chan_error_leds[1] = 0;
+				}
+			}
 			break;
 		case UI_SEL_LOAD:
 			if(ui_blink&0x80) {

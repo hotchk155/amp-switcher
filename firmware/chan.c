@@ -1,10 +1,15 @@
 /////////////////////////////////////////////////////////////////////
 // CHANNEL STATE HANDLING
+
+/*
+Cannot select an amp without a cab being selected
+
+*/
+
 #include <system.h>
 #include "amp-switcher.h"
 
 typedef struct {
-	byte type;
 	byte status;
 } CHANNEL_INFO;
 
@@ -13,27 +18,28 @@ CHANNEL_INFO chan[NUM_CHANNELS];
 
 
 /////////////////////////////////////////////////////////////////////
-// Initialise the roles of each channel
-void chan_init() {	
-	int i;
-	int c = 0;	
-	for(i=0; i<NUM_AMP_CHANNELS; ++i, ++c) {
-		chan[c].type = CH_AMP;
-		chan[c].status = IS_DISCONNECTED;
+static int chan_first_connected(int from, int to) {
+	for(int i=from; i<to; ++i) {
+		if(chan[i].status > IS_DISCONNECTED) {
+			return i;
+		}			
 	}
-	for(i=0; i<NUM_CAB_CHANNELS; ++i, ++c) {
-		chan[c].type = CH_CAB;
-		chan[c].status = IS_DISCONNECTED;
+	return -1;
+}
+
+/////////////////////////////////////////////////////////////////////
+static int chan_first_selected(int from, int to) {
+	for(int i=from; i<to; ++i) {
+		if(chan[i].status == IS_SELECTED) {
+			return i;
+		}			
 	}
-	for(i=0; i<NUM_FX_CHANNELS; ++i, ++c) {
-		chan[c].type = CH_FX;
-		chan[c].status = IS_DISCONNECTED;
-	}	
+	return -1;
 }
 
 /////////////////////////////////////////////////////////////////////
 // Push the channel state data to the hardware
-void chan_update() {
+static void chan_update() {
 	output_state.relays = 0;
 	for(int i=0; i<NUM_CHANNELS; ++i) {
 		switch(chan[i].status) {
@@ -53,83 +59,229 @@ void chan_update() {
 }
 
 /////////////////////////////////////////////////////////////////////
-// Make a channel selected (if possible)
-void chan_select(byte which) {
+static void chan_amp_select(byte which) 
+{
 	int i;
-	if(which < NUM_CHANNELS && chan[which].status >= IS_CONNECTED) {
-		if(chan[which].status < IS_SELECTED) {
-			if(which < AMP_MAX) {
-				for(i=AMP_BASE; i<AMP_MAX; ++i) {
-					if(chan[i].status == IS_SELECTED) {
-						chan[i].status = IS_CONNECTED;
-					}
-				}
-			}
-			else if(which < CAB_MAX) {
-				for(i=CAB_BASE; i<CAB_MAX; ++i) {
-					if(chan[i].status == IS_SELECTED) {
-						chan[i].status = IS_CONNECTED;
-					}
-				}
-			}
-			chan[which].status = IS_SELECTED;
-			chan_update();
+	
+	// ensure that the requested amp is connected 
+	if(chan[which].status < IS_CONNECTED) {
+		ui_chan_error(which);
+		return;
+	}
+
+	// deselect old channel if any
+	int amp = chan_first_selected(AMP_BASE, AMP_MAX);
+	if(amp >= 0) {
+		chan[amp].status = IS_CONNECTED;
+	}	
+	
+	// check a cab is selected
+	int cab = chan_first_selected(CAB_BASE, CAB_MAX);
+	if(cab < 0) {
+		// no - any cab connected?
+		cab = chan_first_connected(CAB_BASE, CAB_MAX);
+		if(cab < 0) {
+			// none connected!
+			for(i=CAB_BASE;i<CAB_MAX;++i) {
+				ui_chan_error(i);
+			}			
+			return;
 		}		
+		// select the cab
+		chan[cab].status = IS_SELECTED;
+	}
+
+	
+	// select new channel
+	chan[which].status = IS_SELECTED;
+}
+
+/////////////////////////////////////////////////////////////////////
+static void chan_amp_cable_in(byte which) {
+	chan[which].status = IS_CONNECTED;
+	// if this is the only connected amp then try to select it
+	if(chan_first_selected(AMP_BASE, AMP_MAX) < 0) {
+		chan_amp_select(which);
 	}
 }
 
 /////////////////////////////////////////////////////////////////////
-// Make channel(s) deselected 
-void chan_deselect(byte which) {
-	if(which < NUM_CHANNELS && chan[which].status == IS_SELECTED) {
-		chan[which].status = IS_CONNECTED;
-		chan_update();
-	}
-}
-
-void chan_deselect_range(byte min, byte max) {
-	byte change = 0;
-	for(byte i=min; i<=max; ++i) {
-		if(i < NUM_CHANNELS && chan[i].status == IS_SELECTED) {
-			chan[i].status = IS_CONNECTED;
-			change = 1;
-		}
-	}	
-	if(change) {
-		chan_update();
-	}
-}
-
-/////////////////////////////////////////////////////////////////////
-// Toggle the state of a channel when button is pressed
-void chan_click(byte which) {
-	if(which < NUM_CHANNELS) {
-		switch(chan[which].status) {
-			case IS_SELECTED:
-				chan_deselect(which);
-				break;
-			case IS_CONNECTED:
-				chan_select(which);
-				break;
-				
-		}
-	}	
-}
-
-/////////////////////////////////////////////////////////////////////
-// Inform a channel that cable has been connected
-void chan_connect(byte which) {
-	if(which < NUM_CHANNELS && chan[which].status == IS_DISCONNECTED) {
-		chan[which].status = IS_CONNECTED;
-		chan_update();
-	}
-}
-
-/////////////////////////////////////////////////////////////////////
-// Inform a channel that cable has been disconnected
-void chan_disconnect(byte which) {
-	if(which < NUM_CHANNELS && chan[which].status > IS_DISCONNECTED) {
+static void chan_amp_cable_out(byte which) {	
+	if(chan[which].status == IS_SELECTED) {
 		chan[which].status = IS_DISCONNECTED;
-		chan_update();
+		int amp = chan_first_connected(AMP_BASE, AMP_MAX);
+		if(amp >= 0) {
+			chan_amp_select(amp);
+		}	
+	}
+	else {
+		chan[which].status = IS_DISCONNECTED;
+	}	
+}
+
+/////////////////////////////////////////////////////////////////////
+static void chan_cab_select(byte which) 
+{
+	// ensure that the requested cab is connected 
+	if(chan[which].status < IS_CONNECTED) {
+		ui_chan_error(which);
+		return;
+	}	
+	// deselect any selected channel
+	int cab = chan_first_selected(CAB_BASE, CAB_MAX);
+	if(cab >= 0) {
+		chan[cab].status = IS_CONNECTED;
+	}		
+	// select the new channel
+	chan[which].status = IS_SELECTED;
+
+	// select an amp channel if none already selected
+	if(chan_first_selected(AMP_BASE, AMP_MAX) < 0) {
+		int amp = chan_first_connected(AMP_BASE, AMP_MAX);
+		if(amp >= 0) {
+			chan_amp_select(amp);
+		}
+	}
+
+}
+
+/////////////////////////////////////////////////////////////////////
+static void chan_cab_cable_in(byte which) {
+	chan[which].status = IS_CONNECTED;		
+	// is there a selected cab?
+	int cab = chan_first_selected(CAB_BASE, CAB_MAX);
+	if(cab < 0) {
+		// no, select the newly connected one
+		chan_cab_select(which);
+	}		
+}
+
+/////////////////////////////////////////////////////////////////////
+static void chan_cab_cable_out(byte which) {
+
+	chan[which].status = IS_DISCONNECTED;		
+	
+	// are any other cabs selected
+	int cab = chan_first_connected(CAB_BASE, CAB_MAX);
+	if(cab >= 0) {
+		// yes, select the other cab
+		chan_cab_select(cab);
+	}
+	// reselect the amp, validating that cab is selected
+	int amp = chan_first_selected(AMP_BASE, AMP_MAX);
+	if(amp >= 0) {
+		// try to reselect
+		chan_amp_select(amp);
+	}		
+}
+
+
+/////////////////////////////////////////////////////////////////////
+static void chan_fx_select(byte which, byte action) 
+{
+	// ensure that the requested fxis connected 
+	if(chan[which].status < IS_CONNECTED) {
+		ui_chan_error(which);
+		return;
+	}
+	if(chan[which].status == IS_SELECTED) {
+		if(action == CHAN_DESELECT || action == CHAN_CLICK) {
+			chan[which].status = IS_CONNECTED;
+		}
+	}
+	else if(chan[which].status == IS_CONNECTED) {
+		if(action == CHAN_SELECT || action == CHAN_CLICK) {
+			chan[which].status = IS_SELECTED;
+		}
+	}	
+}
+
+/////////////////////////////////////////////////////////////////////
+static void chan_fx_cable_in(byte which) {
+	chan[which].status = IS_CONNECTED;	
+}
+
+/////////////////////////////////////////////////////////////////////
+static void chan_fx_cable_out(byte which) {
+	chan[which].status = IS_DISCONNECTED;			
+}
+
+/////////////////////////////////////////////////////////////////////
+// SET INITIAL CABLE CONNECT STATUS FOR A CHANNEL
+void chan_init(byte which, byte status) {
+	if(status) {
+		chan[which].status = IS_CONNECTED;
+	}
+	else {
+		chan[which].status = IS_DISCONNECTED;
 	}
 }
+	
+/////////////////////////////////////////////////////////////////////
+// SELECT DEFAULT CHANNELS AT POWER UP
+void chan_select_default() {
+	// get the first connected amp
+	int amp = chan_first_connected(AMP_BASE, AMP_MAX);
+	if(amp >= 0) {
+		// try to select it
+		chan_amp_select(amp);
+	}
+	chan_update();
+}
+
+/////////////////////////////////////////////////////////////////////
+// CHANNEL EVENT NOTIFICATION
+// 
+// CHAN_CLICK		Panel button click
+// CHAN_SELECT		Selection of channel via MIDI etc
+// CHAN_DESELECT	Deselection of channel via MIDI etc
+// CHAN_CABLEIN		Connection of the cable for a channel
+// CHAN_CABLEOUT	Disconnection of the cable for a channel
+//
+void chan_event(byte which, byte action) {
+	if(which >= AMP_BASE && which < AMP_MAX) {
+		switch(action) 	{
+		case CHAN_SELECT:
+		case CHAN_CLICK:
+			chan_amp_select(which);
+			break;
+		case CHAN_CABLEIN:
+			chan_amp_cable_in(which);
+			break;
+		case CHAN_CABLEOUT:
+			chan_amp_cable_out(which);
+			break;
+		}
+	}
+	else if(which >= CAB_BASE && which < CAB_MAX) {
+		switch(action) 	{
+		case CHAN_SELECT:
+		case CHAN_CLICK:
+			chan_cab_select(which);
+			break;
+		case CHAN_CABLEIN:
+			chan_cab_cable_in(which);
+			break;		
+		case CHAN_CABLEOUT:
+			chan_cab_cable_out(which);
+			break;		
+		}
+	}
+	else if(which >= FX_BASE && which < FX_MAX) {
+		switch(action) 	{
+		case CHAN_SELECT:
+		case CHAN_CLICK:
+		case CHAN_DESELECT:
+			chan_fx_select(which, action);			
+			break;
+		case CHAN_CABLEIN:
+			chan[which].status = IS_CONNECTED;
+			break;		
+		case CHAN_CABLEOUT:
+			chan[which].status = IS_DISCONNECTED;
+			break;		
+		}
+	}
+	chan_update();
+}
+

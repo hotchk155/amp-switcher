@@ -22,6 +22,15 @@
 
 #define NUM_PATCH_BANKS	4
 
+#define FX_OFF		0
+#define FX_ON		1
+#define FX_TOGGLE	2
+
+#define CHAN_DESELECT	0
+#define CHAN_SELECT		1
+#define CHAN_CLICK		2
+#define CHAN_CABLEIN	3
+#define CHAN_CABLEOUT	4
 
 typedef unsigned char byte;
 
@@ -31,6 +40,17 @@ typedef unsigned char byte;
 #define DEFAULT_FX0_CC		72
 #define DEFAULT_FX1_CC		73
 
+// MIDI message bytes
+#define MIDI_SYNCH_TICK     	0xf8
+#define MIDI_SYNCH_START    	0xfa
+#define MIDI_SYNCH_CONTINUE 	0xfb
+#define MIDI_SYNCH_STOP     	0xfc
+#define MIDI_SYSEX_BEGIN     	0xf0
+#define MIDI_SYSEX_END     		0xf7
+#define MIDI_CC_NRPN_HI 		99
+#define MIDI_CC_NRPN_LO 		98
+#define MIDI_CC_DATA_HI 		6
+#define MIDI_CC_DATA_LO 		38
 
 enum {
 	CHAN_OFF,			// deselect a channel
@@ -87,6 +107,12 @@ typedef struct {
 	byte relays;
 } OUTPUT_STATE;
 
+typedef struct {
+	byte midi_chan;
+	byte amp_cc;
+	byte cab_cc;
+	byte fx_cc[NUM_FX_CHANNELS];
+} DEVICE_CONFIG;
 
 
 #define K_CHAN1 0
@@ -117,17 +143,11 @@ extern volatile OUTPUT_STATE output_state = {0};
 
 
 void ui_chan_led(byte which, byte state);
+void ui_chan_error(byte which);
 void ui_key_press(byte i, byte press);
 void ui_run();
 
 /////////////////////////////////////////////////////////////////////
-// Make a channel selected (if possible)
-void chan_init();
-void chan_update();
-void chan_select(byte which);
-void chan_deselect(byte which);
-void chan_click(byte which);
-void chan_connect(byte which);
-void chan_disconnect(byte which);
-void chan_deselect_range(byte min, byte max);
-
+void chan_init(byte which, byte status);
+void chan_select_default();
+void chan_event(byte which, byte action);

@@ -17,20 +17,8 @@
 
 
 //
-// MACRO DEFS
+// HARDWARE DEFS
 //
-// MIDI message bytes
-#define MIDI_SYNCH_TICK     	0xf8
-#define MIDI_SYNCH_START    	0xfa
-#define MIDI_SYNCH_CONTINUE 	0xfb
-#define MIDI_SYNCH_STOP     	0xfc
-#define MIDI_SYSEX_BEGIN     	0xf0
-#define MIDI_SYSEX_END     		0xf7
-#define MIDI_CC_NRPN_HI 		99
-#define MIDI_CC_NRPN_LO 		98
-#define MIDI_CC_DATA_HI 		6
-#define MIDI_CC_DATA_LO 		38
-
 #define P_BUTTON1	porta.3
 #define P_BUTTON2	porta.4
 #define P_BUTTON3	porta.5
@@ -57,23 +45,14 @@
 
 #define MASK_WPUA	  	0b00111000
 
-
-
-
-
 #define TIMER_0_INIT_SCALAR			5	// Timer 0 is an 8 bit timer counting at 250kHz
 #define KEY_DEBOUNCE_MS				50
 #define CABLE_DETECT_DEBOUNCE_MS	200
-
-
 
 #define BLINK_MS_MIDI 2
 
 
 
-//
-// TYPE DEFS
-//
 //
 // GLOBAL DATA
 //
@@ -111,31 +90,9 @@ volatile INPUT_STATE ui_panel_input = {0};
 volatile OUTPUT_STATE output_state = {0};
 volatile OUTPUT_STATE ui_output_state = {0};
 
-void blink_blue(byte ms) {
-	P_LED2 = 1;
-	led2_timeout = ms;
-}
-void blink_yellow(byte ms) {
-	P_LED1 = 1;
-	led1_timeout = ms;
-}
+DEVICE_CONFIG config;
 
-byte load_sr(byte dat) {
-	byte result = 0;
-	byte mask = 0x01;
-	for(int i=0; i<8; ++i) {
-		result<<=1;
-		if(!P_SRI_DAT)
-			result |= 1;
-	
-		P_SR_SCK = 0;
-		P_SRO_DAT = !!(dat & mask);
-		P_SR_SCK = 1;
-		mask <<= 1;
-	}
-	return result;
-}
-
+static byte load_sr(byte dat);
 
 ////////////////////////////////////////////////////////////
 // INTERRUPT HANDLER 
@@ -239,6 +196,27 @@ void interrupt( void )
 	}		
 }
 
+////////////////////////////////////////////////////////////
+void blink_blue(byte ms) {
+	P_LED2 = 1;
+	led2_timeout = ms;
+}
+
+////////////////////////////////////////////////////////////
+void blink_yellow(byte ms) {
+	P_LED1 = 1;
+	led1_timeout = ms;
+}
+
+
+////////////////////////////////////////////////////////////
+void init_config() {
+	config.midi_chan = DEFAULT_MIDI_CHAN;
+	config.amp_cc = DEFAULT_AMP_CC;
+	config.cab_cc = DEFAULT_CAB_CC;
+	config.fx_cc[0] = DEFAULT_FX0_CC;
+	config.fx_cc[1] = DEFAULT_FX1_CC;
+}
 
 ////////////////////////////////////////////////////////////
 // INITIALISE SERIAL PORT FOR MIDI
@@ -414,35 +392,22 @@ byte midi_in()
 	return 0;
 }
 
-
-
-
-
-
-
-
-
-
-
-typedef struct {
-	byte midi_chan;
-	byte amp_cc;
-	byte cab_cc;
-	byte fx_cc[NUM_FX_CHANNELS];
-} DEVICE_CONFIG;
-DEVICE_CONFIG config;
-
-void init_config() {
-	config.midi_chan = DEFAULT_MIDI_CHAN;
-	config.amp_cc = DEFAULT_AMP_CC;
-	config.cab_cc = DEFAULT_CAB_CC;
-	config.fx_cc[0] = DEFAULT_FX0_CC;
-	config.fx_cc[1] = DEFAULT_FX1_CC;
+////////////////////////////////////////////////////////////
+byte load_sr(byte dat) {
+	byte result = 0;
+	byte mask = 0x01;
+	for(int i=0; i<8; ++i) {
+		result<<=1;
+		if(!P_SRI_DAT)
+			result |= 1;
+	
+		P_SR_SCK = 0;
+		P_SRO_DAT = !!(dat & mask);
+		P_SR_SCK = 1;
+		mask <<= 1;
+	}
+	return result;
 }
-
-
-
-
 
 ////////////////////////////////////////////////////////////
 // HANDLE MIDI NOTE
@@ -451,24 +416,21 @@ void on_midi_note(byte chan, byte note, byte vel)
 	if(chan == config.midi_chan) {
 		if(note >= NOTE_AMP_BASE && note < NOTE_AMP_MAX) {
 			if(vel) {
-				chan_select(AMP_BASE + note - NOTE_AMP_BASE);
+				chan_event(AMP_BASE + note - NOTE_AMP_BASE, CHAN_SELECT);
 			}
 		}
 		else if(note >= NOTE_CAB_BASE && note < NOTE_CAB_MAX) {
 			if(vel) {
-				chan_select(CAB_BASE + note - NOTE_CAB_BASE);
+				chan_event(CAB_BASE + note - NOTE_CAB_BASE, CHAN_SELECT);
 			}
 		}
 		else if(note >= NOTE_FX_BASE && note < NOTE_FX_MAX) {
 			if(vel) {
-				chan_select(FX_BASE + note - NOTE_FX_BASE);
+				chan_event(CAB_BASE + note - NOTE_CAB_BASE, CHAN_SELECT);
 			}
 			else {
-				chan_deselect(FX_BASE + note - NOTE_FX_BASE);
+				chan_event(CAB_BASE + note - NOTE_CAB_BASE, CHAN_DESELECT);
 			}
-		}
-		else if(note == NOTE_AMP_MUTE) {
-			chan_deselect_range(AMP_BASE, AMP_MAX);
 		}
 	}	
 }
@@ -479,19 +441,14 @@ void on_midi_cc(byte chan, byte cc, byte value)
 {
 	if(chan == config.midi_chan) {
 		if(cc == config.amp_cc && value < NUM_AMP_CHANNELS) {
-			chan_select(value + AMP_BASE);
+			chan_event(value + AMP_BASE, CHAN_SELECT);
 		}
 		if(cc == config.cab_cc && value < NUM_CAB_CHANNELS) {
-			chan_select(value + CAB_BASE);
+			chan_event(value + CAB_BASE, CHAN_SELECT);
 		}
 		for(int i=0; i < NUM_FX_CHANNELS; ++i) {
 			if(cc == config.fx_cc[i]) {
-				if(value) {
-					chan_select(i + FX_BASE);
-				}
-				else {
-					chan_deselect(i + FX_BASE);
-				}
+				chan_event(value + CAB_BASE, value? CHAN_SELECT : CHAN_DESELECT);
 			}
 		}
 	}
@@ -508,6 +465,12 @@ void on_midi_pgm_change(byte chan, byte pgm)
 // MAIN
 void main()
 { 
+	unsigned long key_state = 0;
+	unsigned long cd_state = 0;
+	unsigned long last_key_state = 0;
+	unsigned long last_cd_state = 0;
+	byte key_debounce = 0;
+	byte cd_debounce = 0;
 	
 	// osc control / 16MHz / internal
 	osccon = 0b01111010;
@@ -526,7 +489,7 @@ void main()
 	anselb = 0b00000000;
 	anselc = 0b00000000;
 
-
+	// configure weak pullups
 	option_reg.7 = 0;
 	wpua.3=1;
 	wpua.4=1;
@@ -538,24 +501,12 @@ void main()
 	P_DIGIT3 = 1;
 	ui_state = UI_DIGIT1;
 
+	// clear the display data
 	memset(&output_state, 0, sizeof(output_state));
 	output_state.pending = 1;
 	panel_input.pending = 0;	
 
-
-/*	// Configure timer 1 (controls tempo)
-	// Input 4MHz
-	// Prescaled to 500KHz
-	tmr1l = 0;	 // reset timer count register
-	tmr1h = 0;
-	t1con.7 = 0; // } Fosc/4 rate
-	t1con.6 = 0; // }
-	t1con.5 = 1; // } 1:8 prescale
-	t1con.4 = 1; // }
-	t1con.0 = 1; // timer 1 on
-	pie1.0 = 1;  // timer 1 interrupt enable
-*/	
-	// Configure timer 0 (controls systemticks)
+	// Configure timer 0 to refresh hardware at once per ms
 	// 	timer 0 runs at 4MHz
 	// 	prescaled 1/16 = 250kHz
 	// 	rollover at 250 = 1kHz
@@ -572,44 +523,52 @@ void main()
 	intcon.7 = 1; //GIE
 	intcon.6 = 1; //PEIE
 
-	// App loop
-
-	
-
-	unsigned long key_state = 0;
-	unsigned long cd_state = 0;
-	unsigned long last_key_state = 0;
-	unsigned long last_cd_state = 0;
-	byte key_debounce = 0;
-	byte cd_debounce = 0;
-
 
 	init_usart();
 	init_config();
-	chan_init();
-	chan_update();
 
+	byte first_panel_input = 1;
+
+	// short settling time
+	delay_ms(10);
+	
+	// force a single panel read
+	panel_input.pending = 0;
+	while(!panel_input.pending);
+
+	// initialise the connected state of each channel
+	unsigned int mask = 0x80;
+	for(int i=0; i<NUM_CHANNELS; ++i) {					
+		if(mask & panel_input.cd_state) {
+			chan_init(i, 1);
+		}
+		else {
+			chan_init(i, 0);
+		}
+		mask>>=1;
+	}
+	
+	// select the default channels
+	chan_select_default();
+
+
+	// App loop
 	for(;;)
 	{	
-	
-		//////////////////////////////////////////////////////////////////////
-		// PROCESS PANEL INPUT
-		//////////////////////////////////////////////////////////////////////
 	
 		// If there are panel inputs waiting for us then grab them...
 		if(panel_input.pending) {
 			key_state = panel_input.key_state;
 			cd_state = panel_input.cd_state;
-			panel_input.pending = 0;
+			panel_input.pending = 0;			
 		}
 
-		// once a millisecond we process panel input
+		// Run once-per-millisecond tasks
 		if(ms_tick)
 		{
 			ms_tick = 0;
 
-			ui_run();
-	
+			// update the status LEDs
 			if(led1_timeout) {
 				if(!--led1_timeout) {
 					P_LED1 = 0;
@@ -620,8 +579,12 @@ void main()
 					P_LED2 = 0;
 				}
 			}
+
+			// run the UI state machine
+			ui_run();
+	
 			
-			// First deal with input from buttons
+			// Deal with input from buttons
 			if(key_debounce) {
 				// debouncing keys
 				--key_debounce;
@@ -662,11 +625,11 @@ void main()
 						if(mask & cd_change) {
 							if(mask & cd_state) {
 								// cable connected 
-								chan_connect(i);
+								chan_event(i, CHAN_CABLEIN);
 							}
 							else {
 								// cable disconnected
-								chan_disconnect(i);
+								chan_event(i, CHAN_CABLEOUT);
 							}
 						}
 						mask>>=1;
@@ -697,7 +660,6 @@ void main()
 		case 0xC0: // PROGRAM CHANGE
 			on_midi_pgm_change(msg&0x0F, midi_params[0]);
 			break;
-		}
-		
+		}		
 	}
 }
