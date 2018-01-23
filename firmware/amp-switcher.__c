@@ -8,12 +8,13 @@ Last Ext=c
 Profiling=0
 Snapshot=0
 [Files]
-Count=5
+Count=6
 File0=amp-switcher.c
 File1=amp-switcher.h
 File2=chan.c
 File3=chars.h
 File4=ui.c
+File5=store.c
 [Watch]
 Count=0
 [Watchpoint]

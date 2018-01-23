@@ -26,11 +26,6 @@
 #define FX_ON		1
 #define FX_TOGGLE	2
 
-#define CHAN_DESELECT	0
-#define CHAN_SELECT		1
-#define CHAN_CLICK		2
-#define CHAN_CABLEIN	3
-#define CHAN_CABLEOUT	4
 
 typedef unsigned char byte;
 
@@ -53,31 +48,26 @@ typedef unsigned char byte;
 #define MIDI_CC_DATA_LO 		38
 
 enum {
-	CHAN_OFF,			// deselect a channel
-	CHAN_ON,			// select a channel, not exclusive
-	CHAN_TOGGLE,		// select/deselect a channel, not exclusive
-	CHAN_ON_EX,			// select a channel, exclusive
-	CHAN_TOGGLE_EX,		// select/deselect a channel, exclusive
-	CHAN_OFF_ALL,		// all off
-	CHAN_ON_FIRST		// first available, exclusive
+	CHAN_INIT,
+	CHAN_CABLEIN,
+	CHAN_CABLEOUT,
+	CHAN_SELECT,
+	CHAN_CLICK,
+	CHAN_DESELECT
+};
+
+enum {
+	ERR_NONE,
+	ERR_CAB_DISCONNECTED,
+	ERR_AMP_DISCONNECTED,
+	ERR_NO_CABS,
+	ERR_NO_AMPS
 };
 
 enum {
 	UI_DIGIT1,
 	UI_DIGIT2,
 	UI_DIGIT3
-};
-
-enum {
-	CH_AMP, 
-	CH_CAB, 
-	CH_FX
-};
-
-enum {
-	IS_DISCONNECTED,
-	IS_CONNECTED,
-	IS_SELECTED
 };
 
 // States for sysex loading
@@ -115,6 +105,17 @@ typedef struct {
 } DEVICE_CONFIG;
 
 
+#define NO_SELECTION (0xFF)
+typedef struct {
+	byte pc_no;
+	byte amp_sel;
+	byte cab_sel;
+	byte fx_sel[NUM_FX_CHANNELS];
+} DEVICE_STATUS;
+
+extern DEVICE_STATUS g_status;
+extern DEVICE_CONFIG g_config;
+
 #define K_CHAN1 0
 #define K_CHAN2 7
 #define K_CHAN3 1
@@ -127,6 +128,11 @@ typedef struct {
 #define K_BUTTON1	16
 #define K_BUTTON2	17
 #define K_BUTTON3	18
+
+#define K_SEL		K_BUTTON1
+#define K_MINUS		K_BUTTON2
+#define K_PLUS		K_BUTTON3
+
 
 #define K_MAX_BITS	19 // the key status registers are 32-bit but how many in use?
 
@@ -143,11 +149,18 @@ extern volatile OUTPUT_STATE output_state = {0};
 
 
 void ui_chan_led(byte which, byte state);
-void ui_chan_error(byte which);
+void ui_error(byte which);
 void ui_key_press(byte i, byte press);
 void ui_run();
 
 /////////////////////////////////////////////////////////////////////
 void chan_init(byte which, byte status);
-void chan_select_default();
+void chan_init_connected(byte which, byte status);
 void chan_event(byte which, byte action);
+
+
+void store_load_patch(byte which);
+void store_save_patch(byte which);
+
+void blink_blue(byte ms);
+void blink_yellow(byte ms);

@@ -16,7 +16,7 @@
 #pragma CLOCK_FREQ 16000000
 
 
-//
+//0
 // HARDWARE DEFS
 //
 #define P_BUTTON1	porta.3
@@ -93,6 +93,9 @@ volatile OUTPUT_STATE ui_output_state = {0};
 DEVICE_CONFIG config;
 
 static byte load_sr(byte dat);
+
+
+DEVICE_CONFIG g_config;
 
 ////////////////////////////////////////////////////////////
 // INTERRUPT HANDLER 
@@ -530,7 +533,7 @@ void main()
 	byte first_panel_input = 1;
 
 	// short settling time
-	delay_ms(10);
+	delay_ms(100);
 	
 	// force a single panel read
 	panel_input.pending = 0;
@@ -539,23 +542,18 @@ void main()
 	// initialise the connected state of each channel
 	unsigned int mask = 0x80;
 	for(int i=0; i<NUM_CHANNELS; ++i) {					
-		if(mask & panel_input.cd_state) {
-			chan_init(i, 1);
-		}
-		else {
-			chan_init(i, 0);
-		}
+		chan_init_connected(i, !!(mask & panel_input.cd_state));
 		mask>>=1;
 	}
+	// update the display
+	chan_event(0, CHAN_INIT);
 	
-	// select the default channels
-	chan_select_default();
 
 
 	// App loop
+	byte q;
 	for(;;)
 	{	
-	
 		// If there are panel inputs waiting for us then grab them...
 		if(panel_input.pending) {
 			key_state = panel_input.key_state;
@@ -567,6 +565,10 @@ void main()
 		if(ms_tick)
 		{
 			ms_tick = 0;
+			if(!q) {
+				P_LED1 = !P_LED1;
+			}
+			++q;
 
 			// update the status LEDs
 			if(led1_timeout) {
