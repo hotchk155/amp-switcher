@@ -1,6 +1,43 @@
+#define P_BUTTON1	porta.3
+#define P_BUTTON2	porta.4
+#define P_BUTTON3	porta.5
+#define P_SRI_DAT	portc.6
+
+#define P_SRI_LOAD	latc.3
+#define P_SR_SCK	latb.4
+#define P_SRO_EN	latb.5
+#define P_SRO_RCK1	latb.6
+#define P_SRO_RCK3	latc.7
+#define P_SRO_RCK2	latb.7
+#define P_SRO_DAT	latc.2
+
+#define P_LED1		lata.0 // YELLOW
+#define P_LED2		lata.1 // BLUE
+#define P_DIGIT1	latc.1
+#define P_DIGIT2	latc.0
+#define P_DIGIT3	lata.2
+
+				  //	0b76543210
+#define MASK_TRISA	  	0b00111000
+#define MASK_TRISB		0b00000000
+#define MASK_TRISC		0b01110000
+
+#define MASK_WPUA	  	0b00111000
+
+#define TIMER_0_INIT_SCALAR			5	// Timer 0 is an 8 bit timer counting at 250kHz
+#define KEY_DEBOUNCE_MS				50
+#define CABLE_DETECT_DEBOUNCE_MS	200
+
+
+
+
 #define NUM_AMP_CHANNELS	4
 #define NUM_CAB_CHANNELS	2
 #define NUM_FX_CHANNELS		2
+
+#define BLINK_MS_MIDI 2
+#define BLINK_MS_ERROR 1000
+#define BLINK_MS_ACTION 100
 
 #define AMP_BASE		0
 #define AMP_MAX			(AMP_BASE + NUM_AMP_CHANNELS)
@@ -20,7 +57,7 @@
 #define NOTE_FX_BASE	60
 #define NOTE_FX_MAX		(NOTE_FX_BASE + NUM_FX_CHANNELS)
 
-#define NUM_PATCH_BANKS	4
+#define NUM_PATCHES 8
 
 #define FX_OFF		0
 #define FX_ON		1
@@ -28,12 +65,6 @@
 
 
 typedef unsigned char byte;
-
-#define DEFAULT_MIDI_CHAN	0
-#define DEFAULT_AMP_CC		70
-#define DEFAULT_CAB_CC		71
-#define DEFAULT_FX0_CC		72
-#define DEFAULT_FX1_CC		73
 
 // MIDI message bytes
 #define MIDI_SYNCH_TICK     	0xf8
@@ -115,8 +146,8 @@ typedef struct {
 
 extern DEVICE_STATUS g_status;
 extern DEVICE_CONFIG g_config;
+extern DEVICE_STATUS g_patch[NUM_PATCHES];
 
-#define NUM_PATCHES 8
 
 #define K_CHAN1 0
 #define K_CHAN2 7
@@ -150,28 +181,29 @@ extern volatile OUTPUT_STATE output_state = {0};
 
 
 void init_config();
-void init_patch(DEVICE_STATUS *status, int index);
+
 
 
 
 void ui_chan_led(byte which, byte state);
-void ui_error(byte which);
 void ui_key_press(byte i, byte press);
 void ui_run();
+void ui_display_msg(byte c1, byte c2, byte c3, byte c4, byte c5, byte c6);
+byte ui_digit(byte which);
 
 /////////////////////////////////////////////////////////////////////
 void chan_init(byte which, byte status);
 void chan_init_connected(byte which, byte status);
 void chan_event(byte which, byte action);
+void chan_init_patch(int index);
 
 
-
-void blink_blue(byte ms);
-void blink_yellow(byte ms);
+void blink_blue(int ms);
+void blink_yellow(int ms);
 
 
 void storage_load_patch(byte which);
 void storage_save_patch(byte which);
 void storage_load_config();
 void storage_save_config();
-void storage_init();
+void storage_init(byte reset);

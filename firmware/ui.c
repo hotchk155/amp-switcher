@@ -1,6 +1,7 @@
 /////////////////////////////////////////////////////////////////////
 // USER INTERFACE
 #include <system.h>
+#include <memory.h>
 #include "amp-switcher.h"
 #include "chars.h"
 
@@ -69,9 +70,6 @@ void ui_display_msg(byte c1, byte c2, byte c3, byte c4, byte c5, byte c6) {
 	ui_msg2[2] = c6;
 	ui_message_timer = 0;
 	ui_message_cycles = 3;
-}
-
-void ui_error(byte which) {
 }
 
 /////////////////////////////////////////////////////////////
@@ -294,6 +292,7 @@ int ui_run_SEL_PCNO(byte event, byte param) {
 		case EVENT_RELEASE:
 			if(param == K_SEL) {
 				g_status.pc_no = ui_numeric;
+				memcpy(&g_patch[ui_cur_patch], &g_status, sizeof(DEVICE_STATUS));
 				storage_save_patch(ui_cur_patch);
 				ui_display_msg(CHAR_P, ui_digit(ui_cur_patch+1), 0, CHAR_S, CHAR_A, CHAR_V);
 				return UI_IDLE;

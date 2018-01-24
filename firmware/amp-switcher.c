@@ -19,39 +19,6 @@
 //0
 // HARDWARE DEFS
 //
-#define P_BUTTON1	porta.3
-#define P_BUTTON2	porta.4
-#define P_BUTTON3	porta.5
-#define P_SRI_DAT	portc.6
-
-#define P_SRI_LOAD	latc.3
-#define P_SR_SCK	latb.4
-#define P_SRO_EN	latb.5
-#define P_SRO_RCK1	latb.6
-#define P_SRO_RCK3	latc.7
-#define P_SRO_RCK2	latb.7
-#define P_SRO_DAT	latc.2
-
-#define P_LED1		lata.0 // YELLOW
-#define P_LED2		lata.1 // BLUE
-#define P_DIGIT1	latc.1
-#define P_DIGIT2	latc.0
-#define P_DIGIT3	lata.2
-
-				  //	0b76543210
-#define MASK_TRISA	  	0b00111000
-#define MASK_TRISB		0b00000000
-#define MASK_TRISC		0b01110000
-
-#define MASK_WPUA	  	0b00111000
-
-#define TIMER_0_INIT_SCALAR			5	// Timer 0 is an 8 bit timer counting at 250kHz
-#define KEY_DEBOUNCE_MS				50
-#define CABLE_DETECT_DEBOUNCE_MS	200
-
-#define BLINK_MS_MIDI 2
-
-
 
 //
 // GLOBAL DATA
@@ -77,8 +44,8 @@ char midi_param = 0;					// number of params currently received
 byte in_sysex = 0;			// whether we are currently inside a sysex block
 
 
-byte led1_timeout = 0;
-byte led2_timeout = 0;
+int led1_timeout = 0;
+int led2_timeout = 0;
 
 
 volatile byte ui_state;
@@ -89,7 +56,6 @@ volatile INPUT_STATE ui_panel_input = {0};
 volatile OUTPUT_STATE output_state = {0};
 volatile OUTPUT_STATE ui_output_state = {0};
 
-DEVICE_CONFIG config;
 
 static byte load_sr(byte dat);
 
@@ -199,13 +165,13 @@ void interrupt( void )
 }
 
 ////////////////////////////////////////////////////////////
-void blink_blue(byte ms) {
+void blink_blue(int ms) {
 	P_LED2 = 1;
 	led2_timeout = ms;
 }
 
 ////////////////////////////////////////////////////////////
-void blink_yellow(byte ms) {
+void blink_yellow(int ms) {
 	P_LED1 = 1;
 	led1_timeout = ms;
 }
@@ -213,22 +179,13 @@ void blink_yellow(byte ms) {
 
 ////////////////////////////////////////////////////////////
 void init_config() {
-	config.midi_chan = DEFAULT_MIDI_CHAN;
-	config.amp_cc = DEFAULT_AMP_CC;
-	config.cab_cc = DEFAULT_CAB_CC;
-	config.fx_cc[0] = DEFAULT_FX0_CC;
-	config.fx_cc[1] = DEFAULT_FX1_CC;
+	g_config.midi_chan = 0;
+	g_config.amp_cc = 70;
+	g_config.cab_cc = 71;
+	g_config.fx_cc[0] = 72;
+	g_config.fx_cc[1] = 73;
 }
 
-////////////////////////////////////////////////////////////
-void init_patch(DEVICE_STATUS *status, int index) {
-	status->pc_no = index + 1;
-	status->amp_sel = NO_SELECTION;
-	status->cab_sel = NO_SELECTION;
-	for(int i=0; i<NUM_FX_CHANNELS; ++i) {
-		status->fx_sel[i] = 0;
-	}
-}
 
 ////////////////////////////////////////////////////////////
 // INITIALISE SERIAL PORT FOR MIDI
@@ -371,7 +328,7 @@ byte load_sr(byte dat) {
 // HANDLE MIDI NOTE
 void on_midi_note(byte chan, byte note, byte vel) 
 {
-	if(chan == config.midi_chan) {
+	if(chan == g_config.midi_chan) {
 		if(note >= NOTE_AMP_BASE && note < NOTE_AMP_MAX) {
 			if(vel) {
 				chan_event(AMP_BASE + note - NOTE_AMP_BASE, CHAN_SELECT);
@@ -397,15 +354,15 @@ void on_midi_note(byte chan, byte note, byte vel)
 // HANDLE MIDI CC MESSAGE
 void on_midi_cc(byte chan, byte cc, byte value) 
 {
-	if(chan == config.midi_chan) {
-		if(cc == config.amp_cc && value < NUM_AMP_CHANNELS) {
+	if(chan == g_config.midi_chan) {
+		if(cc == g_config.amp_cc && value < NUM_AMP_CHANNELS) {
 			chan_event(value + AMP_BASE, CHAN_SELECT);
 		}
-		if(cc == config.cab_cc && value < NUM_CAB_CHANNELS) {
+		if(cc == g_config.cab_cc && value < NUM_CAB_CHANNELS) {
 			chan_event(value + CAB_BASE, CHAN_SELECT);
 		}
 		for(int i=0; i < NUM_FX_CHANNELS; ++i) {
-			if(cc == config.fx_cc[i]) {
+			if(cc == g_config.fx_cc[i]) {
 				chan_event(value + CAB_BASE, value? CHAN_SELECT : CHAN_DESELECT);
 			}
 		}
@@ -416,23 +373,16 @@ void on_midi_cc(byte chan, byte cc, byte value)
 // HANDLE MIDI PROGRAM CHANGE
 void on_midi_pgm_change(byte chan, byte pgm) 
 {
-	if(chan == config.midi_chan) {
-		for(int i=0; i<NUM_PATCHES; ++i) 
-		{
-		}
-		if(cc == config.amp_cc && value < NUM_AMP_CHANNELS) {
-			chan_event(value + AMP_BASE, CHAN_SELECT);
-		}
-		if(cc == config.cab_cc && value < NUM_CAB_CHANNELS) {
-			chan_event(value + CAB_BASE, CHAN_SELECT);
-		}
-		for(int i=0; i < NUM_FX_CHANNELS; ++i) {
-			if(cc == config.fx_cc[i]) {
-				chan_event(value + CAB_BASE, value? CHAN_SELECT : CHAN_DESELECT);
+	if(chan == g_config.midi_chan) {
+		for(int i=0; i<NUM_PATCHES; ++i) {
+			if(pgm == g_patch[i].pc_no) {
+				memcpy(&g_status, &g_patch[i], sizeof(DEVICE_STATUS));
+				ui_display_msg(CHAR_P, ui_digit(i+1), 0, 0, 0, 0);				
+				chan_event(0, CHAN_INIT);
+				break;
 			}
 		}
 	}
-
 }
 
 
@@ -501,7 +451,6 @@ void main()
 
 	init_usart();
 //	init_config();
-	storage_init();
 
 	byte first_panel_input = 1;
 
@@ -511,6 +460,16 @@ void main()
 	// force a single panel read
 	panel_input.pending = 0;
 	while(!panel_input.pending);
+
+	if(panel_input.key_state & ((unsigned long)1<<K_SEL)) {
+		storage_init(1);
+	}
+	else {
+		storage_init(0);
+	}
+
+	
+	memcpy(&g_status, &g_patch[0], sizeof(DEVICE_STATUS));
 
 	// initialise the connected state of each channel
 	unsigned int mask = 0x80;
@@ -524,7 +483,7 @@ void main()
 
 
 	// App loop
-	byte q;
+	panel_input.pending = 0;
 	for(;;)
 	{	
 		// If there are panel inputs waiting for us then grab them...
@@ -538,10 +497,6 @@ void main()
 		if(ms_tick)
 		{
 			ms_tick = 0;
-			if(!q) {
-				P_LED1 = !P_LED1;
-			}
-			++q;
 
 			// update the status LEDs
 			if(led1_timeout) {
@@ -633,7 +588,7 @@ void main()
 			on_midi_cc(msg&0x0F, midi_params[0], midi_params[1]);
 			break;
 		case 0xC0: // PROGRAM CHANGE
-			on_midi_pgm_change(msg&0x0F, midi_params[0]);
+			on_midi_pgm_change(msg&0x0F, midi_params[0]);			
 			break;
 		}		
 	}
