@@ -1,8 +1,8 @@
 [Settings]
 Active Directory=D:\GitHub\amp-switcher\firmware\
-Target=PIC16LF1829
+Target=PIC16F1829
 Active Compiler=BoostC
-Active Config=Debug
+Active Config=Release
 Config=1
 Last Ext=c
 Profiling=0

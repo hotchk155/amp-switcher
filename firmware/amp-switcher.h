@@ -188,7 +188,7 @@ void init_config();
 void ui_chan_led(byte which, byte state);
 void ui_key_press(byte i, byte press);
 void ui_run();
-void ui_display_msg(byte c1, byte c2, byte c3, byte c4, byte c5, byte c6);
+void ui_display_msg(byte count, byte c1, byte c2, byte c3, byte c4, byte c5, byte c6);
 byte ui_digit(byte which);
 
 /////////////////////////////////////////////////////////////////////

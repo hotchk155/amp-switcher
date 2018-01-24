@@ -1,3 +1,13 @@
+/////////////////////////////////////////////////////////////////////
+//
+// AMP SWITCHER FIRMWARE 
+// 2018/Jason Hotchkiss
+//
+/////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////
+// 1 24-01-18	initial version 
+
 //
 // HEADER FILES
 //
@@ -6,7 +16,6 @@
 #include "amp-switcher.h"
 #include "chars.h"
 
-
 // PIC CONFIG BITS
 // - RESET INPUT DISABLED
 // - WATCHDOG TIMER OFF
@@ -14,11 +23,6 @@
 #pragma DATA _CONFIG1, _FOSC_INTOSC & _WDTE_OFF & _MCLRE_OFF &_CLKOUTEN_OFF
 #pragma DATA _CONFIG2, _WRT_OFF & _PLLEN_OFF & _STVREN_ON & _BORV_19 & _LVP_OFF
 #pragma CLOCK_FREQ 16000000
-
-
-//0
-// HARDWARE DEFS
-//
 
 //
 // GLOBAL DATA
@@ -341,10 +345,10 @@ void on_midi_note(byte chan, byte note, byte vel)
 		}
 		else if(note >= NOTE_FX_BASE && note < NOTE_FX_MAX) {
 			if(vel) {
-				chan_event(CAB_BASE + note - NOTE_CAB_BASE, CHAN_SELECT);
+				chan_event(FX_BASE + note - NOTE_FX_BASE, CHAN_SELECT);
 			}
 			else {
-				chan_event(CAB_BASE + note - NOTE_CAB_BASE, CHAN_DESELECT);
+				chan_event(FX_BASE + note - NOTE_FX_BASE, CHAN_DESELECT);
 			}
 		}
 	}	
@@ -363,7 +367,7 @@ void on_midi_cc(byte chan, byte cc, byte value)
 		}
 		for(int i=0; i < NUM_FX_CHANNELS; ++i) {
 			if(cc == g_config.fx_cc[i]) {
-				chan_event(value + CAB_BASE, value? CHAN_SELECT : CHAN_DESELECT);
+				chan_event(i + FX_BASE, value? CHAN_SELECT : CHAN_DESELECT);
 			}
 		}
 	}
@@ -377,7 +381,7 @@ void on_midi_pgm_change(byte chan, byte pgm)
 		for(int i=0; i<NUM_PATCHES; ++i) {
 			if(pgm == g_patch[i].pc_no) {
 				memcpy(&g_status, &g_patch[i], sizeof(DEVICE_STATUS));
-				ui_display_msg(CHAR_P, ui_digit(i+1), 0, 0, 0, 0);				
+				ui_display_msg(1,CHAR_P, ui_digit(i+1), 0, 0, 0, 0);				
 				chan_event(0, CHAN_INIT);
 				break;
 			}

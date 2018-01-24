@@ -14,7 +14,7 @@
 
 #define ALL_RED_LEDS   (unsigned long)0b1010101010101010
 #define ALL_GREEN_LEDS (unsigned long)0b0101010101010101
-#define UI_LONG_PRESS 3000
+#define UI_LONG_PRESS 2000
 //#define UI_MESSAGE_DELAY	1000
 #define UI_MESSAGE_CYCLES	3
 
@@ -61,7 +61,7 @@ byte ui_msg2[3];
 int ui_message_cycles = 0;
 int ui_message_timer = 0;
 
-void ui_display_msg(byte c1, byte c2, byte c3, byte c4, byte c5, byte c6) {
+void ui_display_msg(byte count, byte c1, byte c2, byte c3, byte c4, byte c5, byte c6) {
 	ui_msg1[0] = c1;
 	ui_msg1[1] = c2;
 	ui_msg1[2] = c3;
@@ -69,7 +69,7 @@ void ui_display_msg(byte c1, byte c2, byte c3, byte c4, byte c5, byte c6) {
 	ui_msg2[1] = c5;
 	ui_msg2[2] = c6;
 	ui_message_timer = 0;
-	ui_message_cycles = 3;
+	ui_message_cycles = count;
 }
 
 /////////////////////////////////////////////////////////////
@@ -201,7 +201,7 @@ int ui_run_SEL_LOAD(byte event, byte param) {
 				patch = ui_key_order(param);
 				if(patch>=0) {
 					storage_load_patch(patch);
-					ui_display_msg(CHAR_P, ui_digit(patch+1), 0, 0, 0, 0);
+					ui_display_msg(3,CHAR_P, ui_digit(patch+1), 0, 0, 0, 0);
 					chan_event(0,CHAN_INIT);
 					return UI_IDLE;
 				}
@@ -274,7 +274,7 @@ int ui_run_SEL_PCNO(byte event, byte param) {
 	byte n;
 	switch(event) {
 		case EVENT_INIT:
-			ui_numeric = g_status.pc_no;
+			ui_numeric = g_patch[ui_cur_patch].pc_no;
 			break;
 		case EVENT_AUTOREPEAT:
 			if(param != K_MINUS && param != K_PLUS) {
@@ -294,7 +294,7 @@ int ui_run_SEL_PCNO(byte event, byte param) {
 				g_status.pc_no = ui_numeric;
 				memcpy(&g_patch[ui_cur_patch], &g_status, sizeof(DEVICE_STATUS));
 				storage_save_patch(ui_cur_patch);
-				ui_display_msg(CHAR_P, ui_digit(ui_cur_patch+1), 0, CHAR_S, CHAR_A, CHAR_V);
+				ui_display_msg(3,CHAR_P, ui_digit(ui_cur_patch+1), 0, CHAR_S, CHAR_A, CHAR_V);
 				return UI_IDLE;
 			}
 			break;
@@ -345,7 +345,7 @@ int ui_run_SEL_CHAN(byte event, byte param) {
 					// save the channel
 					g_config.midi_chan = ui_numeric - 1;
 					storage_save_config();
-					ui_display_msg(CHAR_C, CHAR_H, 0, CHAR_S, CHAR_E, CHAR_T);
+					ui_display_msg(3,CHAR_C, CHAR_H, 0, CHAR_S, CHAR_E, CHAR_T);
 				}
 				// release SEL button without saving
 				return UI_IDLE;

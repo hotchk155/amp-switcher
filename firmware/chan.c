@@ -27,7 +27,7 @@ void chan_init() {
 
 ////////////////////////////////////////////////////////////
 void chan_init_patch(int index) {
-	g_patch[index].pc_no = index + 1;
+	g_patch[index].pc_no = index;
 	g_patch[index].amp_sel = NO_SELECTION;
 	g_patch[index].cab_sel = NO_SELECTION;
 	for(int i=0; i<NUM_FX_CHANNELS; ++i) {
@@ -51,7 +51,7 @@ void chan_consolidate()
 	// is the selected cab now disconnected?
 	if(g_status.cab_sel != NO_SELECTION && !is_connected[CAB_BASE + g_status.cab_sel]) {
 		g_status.cab_sel = NO_SELECTION;
-		ui_display_msg(CHAR_C, CHAR_A, CHAR_B, CHAR_O, CHAR_U, CHAR_T);
+		ui_display_msg(3,CHAR_C, CHAR_A, CHAR_B, CHAR_O, CHAR_U, CHAR_T);
 		error = 1;
 	}
 	
@@ -73,7 +73,7 @@ void chan_consolidate()
 		if(g_status.amp_sel != NO_SELECTION) {
 			g_status.amp_sel = NO_SELECTION;
 			// amp deselected as there are no cabs
-			ui_display_msg(CHAR_N, CHAR_O, 0, CHAR_C, CHAR_A, CHAR_B);
+			ui_display_msg(3,CHAR_N, CHAR_O, 0, CHAR_C, CHAR_A, CHAR_B);
 			error = 1;
 		}
 	}
@@ -86,7 +86,7 @@ void chan_consolidate()
 				g_status.amp_sel = NO_SELECTION;
 				if(!error) {
 					// amp deselected as it is no longer connected
-					ui_display_msg(CHAR_A, CHAR_M, CHAR_P, CHAR_O, CHAR_U, CHAR_T);
+					ui_display_msg(3,CHAR_A, CHAR_M, CHAR_P, CHAR_O, CHAR_U, CHAR_T);
 					error = 1;
 				}
 			}
@@ -105,7 +105,7 @@ void chan_consolidate()
 		// still none connected 
 		if(g_status.amp_sel == NO_SELECTION) {
 			if(!error) {
-				ui_display_msg(CHAR_N, CHAR_O, 0, CHAR_A, CHAR_M, CHAR_P);
+				ui_display_msg(3,CHAR_N, CHAR_O, 0, CHAR_A, CHAR_M, CHAR_P);
 				error = 1;
 			}
 		}
@@ -187,12 +187,9 @@ void chan_event(byte which, byte action) {
 		case CHAN_SELECT:
 		case CHAN_CLICK:
 			if(is_connected[which]) {
+				ui_display_msg(1,CHAR_A,CHAR_P|SEG_DP,ui_digit(which-AMP_BASE+1),0,0,0);
 				g_status.amp_sel = which - AMP_BASE;
 			}
-//			else {
-//				ui_display_msg(CHAR_A, CHAR_M, CHAR_P, CHAR_O, CHAR_U, CHAR_T);			
-//				blink_yellow(BLINK_MS_ERROR);
-//			}
 			break;
 		}
 	}
@@ -201,12 +198,9 @@ void chan_event(byte which, byte action) {
 		case CHAN_SELECT:
 		case CHAN_CLICK:
 			if(is_connected[which]) {
+				ui_display_msg(1,CHAR_C, CHAR_B|SEG_DP, ui_digit(which-CAB_BASE+1),0,0,0);
 				g_status.cab_sel = which - CAB_BASE;
 			}			
-//			else {
-//				ui_display_msg(CHAR_C, CHAR_A, CHAR_B, CHAR_O, CHAR_U, CHAR_T);			
-//				blink_yellow(BLINK_MS_ERROR);			
-//			}
 			break;
 		}
 	}
@@ -215,26 +209,22 @@ void chan_event(byte which, byte action) {
 		switch(action) 	{
 		case CHAN_SELECT:
 			if(is_connected[which]) {
+				ui_display_msg(1,CHAR_E, CHAR_F|SEG_DP, ui_digit(1+fx_chan), CHAR_O, CHAR_N, 0);
 				g_status.fx_sel[fx_chan] = 1;
 			}			
-//			else {
-//				ui_display_msg(CHAR_F, CHAR_X, 0, CHAR_O, CHAR_U, CHAR_T);			
-//				blink_yellow(BLINK_MS_ERROR);			
-//			}
 			break;
 		case CHAN_CLICK:
 			if(g_status.fx_sel[fx_chan]) {
+				ui_display_msg(1,CHAR_E, CHAR_F|SEG_DP, ui_digit(1+fx_chan), CHAR_O, CHAR_F, CHAR_F);
 				g_status.fx_sel[fx_chan] = 0;
 			}
 			else if(is_connected[which]) {
+				ui_display_msg(1,CHAR_E, CHAR_F|SEG_DP, ui_digit(1+fx_chan), CHAR_O, CHAR_N, 0);
 				g_status.fx_sel[fx_chan] = 1;
 			}			
-//			else {
-//				ui_display_msg(CHAR_F, CHAR_X, 0, CHAR_O, CHAR_U, CHAR_T);			
-//				blink_yellow(BLINK_MS_ERROR);						
-//			}
 			break;
 		case CHAN_DESELECT:
+			ui_display_msg(1,CHAR_E, CHAR_F|SEG_DP, ui_digit(1+fx_chan), CHAR_O, CHAR_F, CHAR_F);
 			g_status.fx_sel[fx_chan] = 0;
 			break;
 		}
