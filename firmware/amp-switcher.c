@@ -74,8 +74,7 @@ byte midi_status = 0;					// current MIDI message status (running status)
 byte midi_num_params = 0;				// number of parameters needed by current MIDI message
 byte midi_params[2];					// parameter values of current MIDI message
 char midi_param = 0;					// number of params currently received
-byte midi_ticks = 0;					// number of MIDI clock ticks received
-byte sysex_state = SYSEX_NONE;			// whether we are currently inside a sysex block
+byte in_sysex = 0;			// whether we are currently inside a sysex block
 
 
 byte led1_timeout = 0;
@@ -222,6 +221,16 @@ void init_config() {
 }
 
 ////////////////////////////////////////////////////////////
+void init_patch(DEVICE_STATUS *status, int index) {
+	status->pc_no = index + 1;
+	status->amp_sel = NO_SELECTION;
+	status->cab_sel = NO_SELECTION;
+	for(int i=0; i<NUM_FX_CHANNELS; ++i) {
+		status->fx_sel[i] = 0;
+	}
+}
+
+////////////////////////////////////////////////////////////
 // INITIALISE SERIAL PORT FOR MIDI
 void init_usart()
 {
@@ -288,50 +297,20 @@ byte midi_in()
 			case MIDI_SYNCH_CONTINUE:
 			case MIDI_SYNCH_STOP:
 				return ch;		
-/*				
-			// START OF SYSEX	
 			case MIDI_SYSEX_BEGIN:
-				sysex_state = SYSEX_ID0; 
+				in_sysex = 1;
 				break;
 			// END OF SYSEX	
 			case MIDI_SYSEX_END:
-				switch(sysex_state) {
-				case SYSEX_IGNORE: // we're ignoring a syex block
-				case SYSEX_NONE: // we weren't even in sysex mode!					
-					break;			
-				case SYSEX_PARAMH:	// the state we'd expect to end in
-					P_LED1 = 1; 
-					P_LED2 = 1; 
-					delay_ms(250); 
-					delay_ms(250); 
-					delay_ms(250); 
-					delay_ms(250); 
-					P_LED1 = 0; 
-					P_LED2 = 0; 
-					storage_write_patch();	// store to EEPROM 
-					all_reset();
-					break;
-				default:	// any other state would imply bad sysex data
-					P_LED1 = 0; 
-					for(char i=0; i<10; ++i) {
-						P_LED2 = 1; 
-						delay_ms(100);
-						P_LED2 = 0; 
-						delay_ms(100);
-					}
-					all_reset();
-					break;
-				}
-				sysex_state = SYSEX_NONE; 
+				in_sysex = 0;
 				break;
-*/				
 			}
 		}    
 		// STATUS BYTE
 		else if(!!(ch & 0x80))
 		{
 			// a status byte cancels sysex state
-			sysex_state = SYSEX_NONE;
+			in_sysex = 0;
 		
 			midi_param = 0;
 			midi_status = ch; 
@@ -351,44 +330,20 @@ byte midi_in()
 				break;        
 			}
 		}    
-		else 
+		else if(in_sysex)
 		{
-/*		
-			switch(sysex_state) // are we inside a sysex block?
+			// ignored
+		}
+		else if(midi_status)
+		{
+			// gathering parameters
+			midi_params[midi_param++] = ch;
+			if(midi_param >= midi_num_params)
 			{
-			// SYSEX MANUFACTURER ID
-			case SYSEX_ID0: sysex_state = (ch == MY_SYSEX_ID0)? SYSEX_ID1 : SYSEX_IGNORE; break;
-			case SYSEX_ID1: sysex_state = (ch == MY_SYSEX_ID1)? SYSEX_ID2 : SYSEX_IGNORE; break;
-			case SYSEX_ID2: sysex_state = (ch == MY_SYSEX_ID2)? SYSEX_PARAMH : SYSEX_IGNORE; break;
-			// CONFIG PARAM DELIVERED BY SYSEX
-			case SYSEX_PARAMH: nrpn_hi = ch; ++sysex_state; break;
-			case SYSEX_PARAML: nrpn_lo = ch; ++sysex_state;break;
-			case SYSEX_VALUEH: nrpn_value_hi = ch; ++sysex_state;break;
-			case SYSEX_VALUEL: nrpn(nrpn_hi, nrpn_lo, nrpn_value_hi, ch); sysex_state = SYSEX_PARAMH; break;
-			case SYSEX_IGNORE: break;			
-			// MIDI DATA
-			case SYSEX_NONE: */
-				if(midi_status)
-				{
-					// gathering parameters
-					midi_params[midi_param++] = ch;
-					if(midi_param >= midi_num_params)
-					{
-						// we have a complete message.. is it one we care about?
-						midi_param = 0;
-						switch(midi_status&0xF0)
-						{
-						case 0x80: // note off
-						case 0x90: // note on
-						case 0xE0: // pitch bend
-						case 0xB0: // cc
-						case 0xD0: // aftertouch
-							blink_blue(BLINK_MS_MIDI);
-							return midi_status; 
-						}
-					}
-				}
-			//}
+				midi_param = 0;
+				blink_blue(BLINK_MS_MIDI);
+				return midi_status; 
+			}
 		}
 	}
 	// no message ready yet
@@ -461,6 +416,23 @@ void on_midi_cc(byte chan, byte cc, byte value)
 // HANDLE MIDI PROGRAM CHANGE
 void on_midi_pgm_change(byte chan, byte pgm) 
 {
+	if(chan == config.midi_chan) {
+		for(int i=0; i<NUM_PATCHES; ++i) 
+		{
+		}
+		if(cc == config.amp_cc && value < NUM_AMP_CHANNELS) {
+			chan_event(value + AMP_BASE, CHAN_SELECT);
+		}
+		if(cc == config.cab_cc && value < NUM_CAB_CHANNELS) {
+			chan_event(value + CAB_BASE, CHAN_SELECT);
+		}
+		for(int i=0; i < NUM_FX_CHANNELS; ++i) {
+			if(cc == config.fx_cc[i]) {
+				chan_event(value + CAB_BASE, value? CHAN_SELECT : CHAN_DESELECT);
+			}
+		}
+	}
+
 }
 
 
@@ -528,7 +500,8 @@ void main()
 
 
 	init_usart();
-	init_config();
+//	init_config();
+	storage_init();
 
 	byte first_panel_input = 1;
 

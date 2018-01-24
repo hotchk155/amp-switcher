@@ -16,13 +16,11 @@ byte is_connected[NUM_CHANNELS];
 DEVICE_STATUS g_status;
 
 /////////////////////////////////////////////////////////////////////
+
+
+
 void chan_init() {
 	int i;
-	g_status.amp_sel = NO_SELECTION;
-	g_status.cab_sel = NO_SELECTION;
-	for(i=0; i<NUM_FX_CHANNELS; ++i) {
-		g_status.fx_sel[i] = 0;
-	}
 	for(i=0; i<NUM_CHANNELS; ++i) {
 		is_connected[i] = 0;
 	}

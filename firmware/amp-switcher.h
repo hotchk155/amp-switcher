@@ -110,11 +110,13 @@ typedef struct {
 	byte pc_no;
 	byte amp_sel;
 	byte cab_sel;
-	byte fx_sel[NUM_FX_CHANNELS];
+	byte fx_sel[NUM_FX_CHANNELS];	
 } DEVICE_STATUS;
 
 extern DEVICE_STATUS g_status;
 extern DEVICE_CONFIG g_config;
+
+#define NUM_PATCHES 8
 
 #define K_CHAN1 0
 #define K_CHAN2 7
@@ -147,6 +149,10 @@ extern volatile INPUT_STATE panel_input = {0};
 extern volatile OUTPUT_STATE output_state = {0};
 
 
+void init_config();
+void init_patch(DEVICE_STATUS *status, int index);
+
+
 
 void ui_chan_led(byte which, byte state);
 void ui_error(byte which);
@@ -159,8 +165,13 @@ void chan_init_connected(byte which, byte status);
 void chan_event(byte which, byte action);
 
 
-void store_load_patch(byte which);
-void store_save_patch(byte which);
 
 void blink_blue(byte ms);
 void blink_yellow(byte ms);
+
+
+void storage_load_patch(byte which);
+void storage_save_patch(byte which);
+void storage_load_config();
+void storage_save_config();
+void storage_init();

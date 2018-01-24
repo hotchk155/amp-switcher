@@ -4,14 +4,16 @@
 #include "amp-switcher.h"
 #include "chars.h"
 
-#define SHOW_PATCH_MS 	3000
+#define CHANNEL_LEDS_FLASH_CYCLE 400
+#define CHANNEL_LEDS_FLASH_OFF 100
+
 #define KB_REPEAT_DELAY_MS 	1000
 #define KB_REPEAT_INTERVAL_MS 	30
 #define KB_CHAN_ERROR_MS 	1000
 
 #define ALL_RED_LEDS   (unsigned long)0b1010101010101010
 #define ALL_GREEN_LEDS (unsigned long)0b0101010101010101
-#define UI_LONG_PRESS 2000
+#define UI_LONG_PRESS 3000
 //#define UI_MESSAGE_DELAY	1000
 #define UI_MESSAGE_CYCLES	3
 
@@ -181,8 +183,12 @@ int ui_run_SEL_LOAD(byte event, byte param) {
 			output_state.digit[1] = CHAR_O;
 			output_state.digit[2] = CHAR_D;
 			ui_press_counter = 0;
+			ui_message_timer = 0;
 			break;						
 		case EVENT_TICK:
+			if(++ui_message_timer > CHANNEL_LEDS_FLASH_CYCLE) {
+				ui_message_timer = 0;
+			}
 			if(++ui_press_counter >= UI_LONG_PRESS) {
 				// when SEL button has been pressed for long time
 				// we change to SAVE mode
@@ -190,11 +196,17 @@ int ui_run_SEL_LOAD(byte event, byte param) {
 			}
 			break;
 		case EVENT_PRESS:
-			patch = ui_key_order(param);
-			if(patch>=0) {
-				store_load_patch(patch);
-				ui_display_msg(CHAR_P, ui_digit(patch+1), 0, 0, 0, 0);
-				return UI_IDLE;
+			if(param == K_MINUS || param == K_PLUS) {
+				return UI_SEL_CHAN;
+			}
+			else {		
+				patch = ui_key_order(param);
+				if(patch>=0) {
+					storage_load_patch(patch);
+					ui_display_msg(CHAR_P, ui_digit(patch+1), 0, 0, 0, 0);
+					chan_event(0,CHAN_INIT);
+					return UI_IDLE;
+				}
 			}
 			break;
 		case EVENT_RELEASE:
@@ -205,8 +217,14 @@ int ui_run_SEL_LOAD(byte event, byte param) {
 			}
 			break;
 	}
-	output_state.chan_leds[0] = ALL_GREEN_LEDS;
-	output_state.chan_leds[1] = ALL_GREEN_LEDS;
+	if(ui_message_timer > CHANNEL_LEDS_FLASH_OFF) {
+		output_state.chan_leds[0] = ALL_GREEN_LEDS;
+		output_state.chan_leds[1] = ALL_GREEN_LEDS;
+	}
+	else {
+		output_state.chan_leds[0] = 0;
+		output_state.chan_leds[1] = 0;
+	}
 	output_state.pending = 1;
 	return UI_NONE;
 }
@@ -220,12 +238,10 @@ int ui_run_SEL_SAVE(byte event, byte param) {
 			output_state.digit[0] = CHAR_S;
 			output_state.digit[1] = CHAR_A;
 			output_state.digit[2] = CHAR_V;
-			ui_press_counter = 0;
 			break;
 		case EVENT_TICK:
-			if(++ui_press_counter >= UI_LONG_PRESS) {
-				// long press changes us to SEL CHAN mode
-				return UI_SEL_CHAN;
+			if(++ui_message_timer > CHANNEL_LEDS_FLASH_CYCLE) {
+				ui_message_timer = 0;
 			}
 			break;
 		case EVENT_PRESS:
@@ -242,8 +258,14 @@ int ui_run_SEL_SAVE(byte event, byte param) {
 			}
 			break;
 	}
-	output_state.chan_leds[0] = ALL_RED_LEDS;
-	output_state.chan_leds[1] = ALL_RED_LEDS;
+	if(ui_message_timer > CHANNEL_LEDS_FLASH_OFF) {
+		output_state.chan_leds[0] = ALL_RED_LEDS;
+		output_state.chan_leds[1] = ALL_RED_LEDS;
+	}
+	else {
+		output_state.chan_leds[0] = 0;
+		output_state.chan_leds[1] = 0;
+	}
 	output_state.pending = 1;
 	return UI_NONE;
 }
@@ -272,7 +294,7 @@ int ui_run_SEL_PCNO(byte event, byte param) {
 		case EVENT_RELEASE:
 			if(param == K_SEL) {
 				g_status.pc_no = ui_numeric;
-				store_save_patch(ui_cur_patch);
+				storage_save_patch(ui_cur_patch);
 				ui_display_msg(CHAR_P, ui_digit(ui_cur_patch+1), 0, CHAR_S, CHAR_A, CHAR_V);
 				return UI_IDLE;
 			}
@@ -323,6 +345,7 @@ int ui_run_SEL_CHAN(byte event, byte param) {
 				if(ui_numeric) {
 					// save the channel
 					g_config.midi_chan = ui_numeric - 1;
+					storage_save_config();
 					ui_display_msg(CHAR_C, CHAR_H, 0, CHAR_S, CHAR_E, CHAR_T);
 				}
 				// release SEL button without saving

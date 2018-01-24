@@ -7,14 +7,17 @@ Config=1
 Last Ext=c
 Profiling=0
 Snapshot=0
+Type=0
+Warnings=1
+Model=0
 [Files]
 Count=6
 File0=amp-switcher.c
 File1=amp-switcher.h
 File2=chan.c
 File3=chars.h
-File4=ui.c
-File5=store.c
+File4=store.c
+File5=ui.c
 [Watch]
 Count=0
 [Watchpoint]
@@ -25,3 +28,9 @@ Ports=1
 Interrupt=1
 Eeprom=1
 Misc=1
+[Debugger]
+DebugFromMain=1
+[Tools]
+BoostDir=C:\Program Files (x86)\SourceBoost\
+Programmer=
+PrefixWithBuildThreadNum=0
